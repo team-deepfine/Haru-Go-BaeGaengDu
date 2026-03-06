@@ -1,0 +1,31 @@
+# Binaries
+/bin/
+*.exe
+*.out
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Database
+*.db
+*.sqlite
+
+# Go
+vendor/
+
+# Claude
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# Docs
+requirments.md
