@@ -41,7 +41,7 @@ func (h *EventHandler) Create(c *gin.Context) {
 		return
 	}
 
-	input, validationErrors := h.toServiceInput(req)
+	input, validationErrors := toServiceInput(req)
 	if len(validationErrors) > 0 {
 		response.ValidationFailed(c, validationErrors)
 		return
@@ -49,11 +49,11 @@ func (h *EventHandler) Create(c *gin.Context) {
 
 	event, err := h.svc.CreateEvent(c.Request.Context(), input)
 	if err != nil {
-		h.handleServiceError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 
-	response.JSON(c, http.StatusCreated, event)
+	response.JSON(c, http.StatusCreated, dto.ToEventResponse(event))
 }
 
 // GetByID handles GET /api/events/:id.
@@ -66,11 +66,11 @@ func (h *EventHandler) GetByID(c *gin.Context) {
 
 	event, err := h.svc.GetEvent(c.Request.Context(), id)
 	if err != nil {
-		h.handleServiceError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 
-	response.JSON(c, http.StatusOK, event)
+	response.JSON(c, http.StatusOK, dto.ToEventResponse(event))
 }
 
 // List handles GET /api/events?start=&end=.
@@ -96,14 +96,11 @@ func (h *EventHandler) List(c *gin.Context) {
 
 	events, err := h.svc.ListEvents(c.Request.Context(), start, end)
 	if err != nil {
-		h.handleServiceError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 
-	response.JSON(c, http.StatusOK, dto.EventListResponse{
-		Events: events,
-		Count:  len(events),
-	})
+	response.JSON(c, http.StatusOK, dto.ToEventListResponse(events))
 }
 
 // Update handles PUT /api/events/:id.
@@ -120,7 +117,7 @@ func (h *EventHandler) Update(c *gin.Context) {
 		return
 	}
 
-	input, validationErrors := h.toServiceInput(req)
+	input, validationErrors := toServiceInput(req)
 	if len(validationErrors) > 0 {
 		response.ValidationFailed(c, validationErrors)
 		return
@@ -128,11 +125,11 @@ func (h *EventHandler) Update(c *gin.Context) {
 
 	event, err := h.svc.UpdateEvent(c.Request.Context(), id, input)
 	if err != nil {
-		h.handleServiceError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 
-	response.JSON(c, http.StatusOK, event)
+	response.JSON(c, http.StatusOK, dto.ToEventResponse(event))
 }
 
 // Delete handles DELETE /api/events/:id.
@@ -144,14 +141,14 @@ func (h *EventHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.svc.DeleteEvent(c.Request.Context(), id); err != nil {
-		h.handleServiceError(c, err)
+		handleServiceError(c, err)
 		return
 	}
 
 	c.Status(http.StatusNoContent)
 }
 
-func (h *EventHandler) toServiceInput(req dto.CreateEventRequest) (service.CreateEventInput, []response.ValidationError) {
+func toServiceInput(req dto.CreateEventRequest) (service.CreateEventInput, []response.ValidationError) {
 	var errs []response.ValidationError
 
 	startAt, err := time.Parse(time.RFC3339, req.StartAt)
@@ -167,32 +164,22 @@ func (h *EventHandler) toServiceInput(req dto.CreateEventRequest) (service.Creat
 		return service.CreateEventInput{}, errs
 	}
 
-	tz := req.Timezone
-	if tz == "" {
-		tz = "UTC"
-	}
-
-	offsets := req.ReminderOffsets
-	if offsets == nil {
-		offsets = []int64{}
-	}
-
 	return service.CreateEventInput{
 		Title:           req.Title,
 		StartAt:         startAt,
 		EndAt:           endAt,
 		AllDay:          req.AllDay,
-		Timezone:        tz,
+		Timezone:        req.Timezone,
 		LocationName:    req.LocationName,
 		LocationAddress: req.LocationAddress,
 		LocationLat:     req.LocationLat,
 		LocationLng:     req.LocationLng,
-		ReminderOffsets: offsets,
+		ReminderOffsets: req.ReminderOffsets,
 		Notes:           req.Notes,
 	}, nil
 }
 
-func (h *EventHandler) handleServiceError(c *gin.Context, err error) {
+func handleServiceError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrEventNotFound):
 		response.Error(c, http.StatusNotFound, err.Error())

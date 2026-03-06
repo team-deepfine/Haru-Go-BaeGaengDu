@@ -4,10 +4,10 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 // Int64Array is a JSON-serialized []int64 that works with both PostgreSQL and SQLite.
@@ -61,10 +61,16 @@ type Event struct {
 	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
-// BeforeCreate generates a UUID v7 before inserting a new event.
-func (e *Event) BeforeCreate(tx *gorm.DB) error {
-	if e.ID == uuid.Nil {
-		e.ID = uuid.Must(uuid.NewV7())
+// Validate checks domain invariants of the Event entity.
+func (e *Event) Validate() error {
+	if strings.TrimSpace(e.Title) == "" {
+		return ErrTitleRequired
+	}
+	if e.EndAt.Before(e.StartAt) {
+		return ErrInvalidTimeRange
+	}
+	if _, err := time.LoadLocation(e.Timezone); err != nil {
+		return ErrInvalidTimezone
 	}
 	return nil
 }
