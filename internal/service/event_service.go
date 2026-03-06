@@ -50,7 +50,7 @@ func (s *eventService) CreateEvent(ctx context.Context, req CreateEventInput) (*
 	}
 
 	event := &model.Event{
-		ID:              uuid.New(),
+		ID:              uuid.Must(uuid.NewV7()),
 		Title:           req.Title,
 		StartAt:         req.StartAt.UTC(),
 		EndAt:           req.EndAt.UTC(),

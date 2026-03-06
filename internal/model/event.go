@@ -61,10 +61,10 @@ type Event struct {
 	UpdatedAt       time.Time  `gorm:"autoUpdateTime" json:"updatedAt"`
 }
 
-// BeforeCreate generates a UUID before inserting a new event.
+// BeforeCreate generates a UUID v7 before inserting a new event.
 func (e *Event) BeforeCreate(tx *gorm.DB) error {
 	if e.ID == uuid.Nil {
-		e.ID = uuid.New()
+		e.ID = uuid.Must(uuid.NewV7())
 	}
 	return nil
 }
