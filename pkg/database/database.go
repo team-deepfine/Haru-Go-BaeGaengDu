@@ -15,18 +15,18 @@ import (
 func New(cfg *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 
-	switch cfg.DBDriver {
+	switch cfg.DB.Driver {
 	case "postgres":
-		if cfg.DatabaseURL == "" {
+		if cfg.DB.URL == "" {
 			return nil, fmt.Errorf("DATABASE_URL is required for postgres driver")
 		}
-		dialector = postgres.Open(cfg.DatabaseURL)
+		dialector = postgres.Open(cfg.DB.URL)
 		slog.Info("using PostgreSQL database")
 	case "sqlite":
 		dialector = sqlite.Open("haru.db")
 		slog.Info("using SQLite database (development mode)")
 	default:
-		return nil, fmt.Errorf("unsupported DB_DRIVER: %s", cfg.DBDriver)
+		return nil, fmt.Errorf("unsupported DB_DRIVER: %s", cfg.DB.Driver)
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{
