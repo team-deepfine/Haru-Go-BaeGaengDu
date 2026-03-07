@@ -13,7 +13,7 @@ func applyDefaults(req *CreateEventInput) {
 		req.Timezone = "UTC"
 	}
 	if req.ReminderOffsets == nil {
-		req.ReminderOffsets = []int64{}
+		req.ReminderOffsets = []int64{180}
 	}
 }
 

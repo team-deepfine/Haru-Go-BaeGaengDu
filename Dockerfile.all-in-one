@@ -1,0 +1,30 @@
+# All-in-one: PostgreSQL + Haru App in single container
+FROM golang:1.24-alpine AS builder
+ENV GOTOOLCHAIN=auto
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /haru ./cmd/server
+
+FROM alpine:3.19
+
+RUN apk add --no-cache postgresql16 postgresql16-contrib su-exec bash
+
+ENV PGDATA=/var/lib/postgresql/data \
+    POSTGRES_USER=haru \
+    POSTGRES_PASSWORD=haru \
+    POSTGRES_DB=haru \
+    PORT=8080 \
+    DB_DRIVER=postgres
+
+RUN mkdir -p /var/lib/postgresql/data /run/postgresql && \
+    chown -R postgres:postgres /var/lib/postgresql /run/postgresql
+
+COPY --from=builder /haru /haru
+COPY docker-entrypoint-aio.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/entrypoint.sh"]

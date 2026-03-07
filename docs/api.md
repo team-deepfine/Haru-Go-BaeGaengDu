@@ -41,7 +41,7 @@ POST /api/events
 | locationAddress | string \| null | | 주소 |
 | locationLat | number \| null | | 위도 |
 | locationLng | number \| null | | 경도 |
-| reminderOffsets | number[] | | 알림 오프셋 배열 (default: `[]`) |
+| reminderOffsets | number[] | | 알림 오프셋 배열 (분 단위, default: `[180]` = 3시간 전). 빈 배열 `[]`을 명시하면 알림 없음 |
 | notes | string \| null | | 메모 |
 
 **Example**
@@ -230,6 +230,77 @@ curl -X DELETE http://localhost:8080/api/events/550e8400-e29b-41d4-a716-44665544
 
 ---
 
+## Voice Parsing API
+
+### 6. 음성 텍스트 → 일정 파싱
+
+한국어 음성 텍스트를 AI(Gemini)로 분석하여 구조화된 일정 데이터를 추출합니다.
+응답의 `event` 필드는 `POST /api/events`의 요청 본문과 동일한 구조이므로, 그대로 일정 생성에 사용할 수 있습니다.
+
+```
+POST /api/events/parse-voice
+```
+
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| text | string | O | 음성 인식된 한국어 텍스트 |
+
+**Example**
+
+```bash
+curl -X POST http://localhost:8080/api/events/parse-voice \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "다음주 수요일 오후 3시에 서초동 교대역 근처 스타벅스에서 김대리랑 프로젝트 회의하는데 30분 전에 알려줘"
+  }'
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "event": {
+    "title": "프로젝트 회의",
+    "startAt": "2024-03-13T15:00:00+09:00",
+    "endAt": "2024-03-13T16:00:00+09:00",
+    "allDay": false,
+    "timezone": "Asia/Seoul",
+    "locationName": "스타벅스",
+    "locationAddress": null,
+    "locationLat": null,
+    "locationLng": null,
+    "reminderOffsets": [30],
+    "notes": "김대리랑. 서초동 교대역 근처."
+  },
+  "confidence": 0.9,
+  "followUpQuestion": null
+}
+```
+
+**Response Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| event | CreateEventRequest | 파싱된 일정 데이터 (`POST /api/events` 요청 본문과 동일 구조) |
+| confidence | number | 파싱 신뢰도 (0.0~1.0). 0.5 미만이면 `followUpQuestion` 확인 권장 |
+| followUpQuestion | string \| null | 정보 부족 시 AI가 생성하는 후속 질문 (한국어) |
+
+**AI 기본값 규칙**
+
+| 누락 정보 | 기본값 |
+|-----------|--------|
+| 날짜 | 오늘 |
+| 종료 시간 | 시작 시간 + 1시간 |
+| 알림 | `[10]` (10분 전) |
+| 장소 | null |
+| 메모 | null |
+
+> **사용 흐름:** parse-voice → 사용자 확인/수정 → `POST /api/events`로 저장
+
+---
+
 ## Error Response
 
 모든 에러는 [RFC 7807 Problem Details](https://tools.ietf.org/html/rfc7807) 형식을 따릅니다.
@@ -264,7 +335,9 @@ curl -X DELETE http://localhost:8080/api/events/550e8400-e29b-41d4-a716-44665544
 |--------|------|-----------|
 | 400 | Bad Request | JSON 파싱 실패, 유효성 검증 실패, 잘못된 UUID 형식 |
 | 404 | Not Found | 존재하지 않는 일정 ID |
+| 422 | Unprocessable Entity | 음성 텍스트에서 일정 정보 추출 실패 |
 | 500 | Internal Server Error | 서버 내부 오류 |
+| 502 | Bad Gateway | AI 서비스(Gemini) 호출 실패 또는 API 키 미설정 |
 
 ### Validation Rules
 
@@ -291,7 +364,7 @@ curl -X DELETE http://localhost:8080/api/events/550e8400-e29b-41d4-a716-44665544
 | locationAddress | string | Yes | 주소 (없으면 응답에서 생략) |
 | locationLat | number | Yes | 위도 (없으면 응답에서 생략) |
 | locationLng | number | Yes | 경도 (없으면 응답에서 생략) |
-| reminderOffsets | number[] | No | 알림 오프셋 배열 |
+| reminderOffsets | number[] | No | 알림 오프셋 배열 (분 단위, 미지정 시 `[180]`) |
 | notes | string | Yes | 메모 (없으면 응답에서 생략) |
 | createdAt | string (ISO-8601) | No | 생성 시각 (UTC) |
 | updatedAt | string (ISO-8601) | No | 수정 시각 (UTC) |
