@@ -21,6 +21,10 @@ services:
       PORT: ${PORT:-8080}
       DB_DRIVER: postgres
       DATABASE_URL: postgres://${POSTGRES_USER:-haru}:${POSTGRES_PASSWORD:-haru}@db:5432/${POSTGRES_DB:-haru}?sslmode=disable
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-Asia/Seoul}
+      VOICE_PARSE_PROMPT_PATH: /prompts/voice_parse.txt
     depends_on:
       db:
         condition: service_healthy
