@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -26,6 +27,7 @@ func NewAuthHandler(svc service.AuthService) *AuthHandler {
 // RegisterPublicRoutes registers auth routes that do NOT require authentication.
 func (h *AuthHandler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.POST("/auth/apple", h.AppleLogin)
+	rg.POST("/auth/apple/callback", h.AppleCallback)
 	rg.POST("/auth/kakao", h.KakaoLogin)
 	rg.POST("/auth/refresh", h.Refresh)
 }
@@ -57,6 +59,51 @@ func (h *AuthHandler) AppleLogin(c *gin.Context) {
 		ExpiresIn:    tokenPair.ExpiresIn,
 		User:         dto.ToUserResponse(user),
 	})
+}
+
+// AppleCallback handles POST /api/auth/apple/callback.
+// Apple sends authorization code via form_post to this endpoint.
+// It exchanges the code for tokens and returns an HTML page with the result.
+func (h *AuthHandler) AppleCallback(c *gin.Context) {
+	code := c.PostForm("code")
+	if code == "" {
+		c.Data(http.StatusBadRequest, "text/html; charset=utf-8", []byte(`<html><body><h1>Error</h1><p>code is missing from Apple callback</p></body></html>`))
+		return
+	}
+
+	user, tokenPair, err := h.svc.AppleLogin(c.Request.Context(), code)
+	if err != nil {
+		slog.Error("apple callback login failed", "error", err)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(fmt.Sprintf(
+			`<html><body><h1>Login Failed</h1><pre>%s</pre></body></html>`, err.Error(),
+		)))
+		return
+	}
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(fmt.Sprintf(
+		`<html><body>
+<h1>Apple Login Success!</h1>
+<h3>User</h3>
+<pre>ID: %s
+Provider: %s
+Email: %s</pre>
+<h3>Tokens</h3>
+<pre>Access Token: %s
+
+Refresh Token: %s
+
+Expires In: %d seconds</pre>
+</body></html>`,
+		user.ID, user.Provider, stringOrEmpty(user.Email),
+		tokenPair.AccessToken, tokenPair.RefreshToken, tokenPair.ExpiresIn,
+	)))
+}
+
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return "(none)"
+	}
+	return *s
 }
 
 // KakaoLogin handles POST /api/auth/kakao.
@@ -144,7 +191,11 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.DeleteAccount(c.Request.Context(), userID); err != nil {
+	var req dto.DeleteAccountRequest
+	// body가 없어도 허용 (Apple이 아닌 사용자)
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.svc.DeleteAccount(c.Request.Context(), userID, req.Code); err != nil {
 		handleAuthError(c, err)
 		return
 	}
@@ -155,6 +206,7 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 func handleAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrInvalidAuthCode):
+		slog.Error("auth code exchange failed", "error", err)
 		response.Error(c, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, model.ErrInvalidRefreshToken):
 		response.Error(c, http.StatusUnauthorized, err.Error())

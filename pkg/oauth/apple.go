@@ -15,7 +15,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const appleTokenURL = "https://appleid.apple.com/auth/token"
+const (
+	appleTokenURL  = "https://appleid.apple.com/auth/token"
+	appleRevokeURL = "https://appleid.apple.com/auth/revoke"
+)
 
 // AppleUserInfo holds user information extracted from Apple's token response.
 type AppleUserInfo struct {
@@ -31,6 +34,7 @@ type AppleClient struct {
 	privateKey  *ecdsa.PrivateKey
 	redirectURI string
 	tokenURL    string
+	revokeURL   string
 	httpClient  *http.Client
 }
 
@@ -49,6 +53,7 @@ func NewAppleClient(clientID, teamID, keyID, privateKeyPEM, redirectURI string) 
 		privateKey:  privKey,
 		redirectURI: redirectURI,
 		tokenURL:    appleTokenURL,
+		revokeURL:   appleRevokeURL,
 		httpClient:  &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
@@ -56,6 +61,11 @@ func NewAppleClient(clientID, teamID, keyID, privateKeyPEM, redirectURI string) 
 // SetTokenURL overrides the Apple token endpoint URL (for testing).
 func (a *AppleClient) SetTokenURL(url string) {
 	a.tokenURL = url
+}
+
+// SetRevokeURL overrides the Apple revoke endpoint URL (for testing).
+func (a *AppleClient) SetRevokeURL(url string) {
+	a.revokeURL = url
 }
 
 // ExchangeAndGetUser exchanges an authorization code for an Apple access token,
@@ -116,6 +126,10 @@ func (a *AppleClient) exchangeCode(ctx context.Context, code, clientSecret strin
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		var errBody map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
+			return nil, fmt.Errorf("apple token endpoint returned status %d: %v", resp.StatusCode, errBody)
+		}
 		return nil, fmt.Errorf("apple token endpoint returned status %d", resp.StatusCode)
 	}
 
@@ -129,6 +143,58 @@ func (a *AppleClient) exchangeCode(ctx context.Context, code, clientSecret strin
 	}
 
 	return &tokenResp, nil
+}
+
+// RevokeByAuthCode exchanges the authorization code for tokens, then revokes
+// the refresh token via Apple's revoke endpoint. Used during account deletion.
+func (a *AppleClient) RevokeByAuthCode(ctx context.Context, code string) error {
+	clientSecret, err := a.generateClientSecret()
+	if err != nil {
+		return fmt.Errorf("generate client secret: %w", err)
+	}
+
+	tokenResp, err := a.exchangeCode(ctx, code, clientSecret)
+	if err != nil {
+		return fmt.Errorf("exchange code for revoke: %w", err)
+	}
+
+	if tokenResp.RefreshToken == "" {
+		return fmt.Errorf("apple did not return a refresh token")
+	}
+
+	return a.revokeToken(ctx, tokenResp.RefreshToken, clientSecret)
+}
+
+// revokeToken calls Apple's token revoke endpoint.
+func (a *AppleClient) revokeToken(ctx context.Context, token, clientSecret string) error {
+	data := url.Values{
+		"client_id":       {a.clientID},
+		"client_secret":   {clientSecret},
+		"token":           {token},
+		"token_type_hint": {"refresh_token"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.revokeURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return fmt.Errorf("create revoke request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("apple revoke request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errBody map[string]interface{}
+		if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
+			return fmt.Errorf("apple revoke endpoint returned status %d: %v", resp.StatusCode, errBody)
+		}
+		return fmt.Errorf("apple revoke endpoint returned status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // decodeIDToken extracts claims from the id_token without signature verification.

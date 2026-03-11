@@ -293,10 +293,23 @@ func TestGetCurrentUser_NotFound(t *testing.T) {
 	}
 }
 
-func TestDeleteAccount_Success(t *testing.T) {
+func TestDeleteAccount_NonAppleUser(t *testing.T) {
 	userID := uuid.Must(uuid.NewV7())
 	deleteTokensCalled := false
 	deleteUserCalled := false
+
+	userRepo := &mockUserRepository{
+		findByIDFn: func(_ context.Context, id uuid.UUID) (*model.User, error) {
+			return &model.User{ID: userID, Provider: "kakao", ProviderSub: "kakao-123"}, nil
+		},
+		deleteFn: func(_ context.Context, id uuid.UUID) error {
+			deleteUserCalled = true
+			if id != userID {
+				t.Errorf("expected userID %s, got %s", userID, id)
+			}
+			return nil
+		},
+	}
 
 	tokenRepo := &mockTokenRepository{
 		deleteByUserIDFn: func(_ context.Context, id uuid.UUID) error {
@@ -308,19 +321,100 @@ func TestDeleteAccount_Success(t *testing.T) {
 		},
 	}
 
+	svc := NewAuthService(userRepo, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+
+	err := svc.DeleteAccount(context.Background(), userID, "")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if !deleteTokensCalled {
+		t.Error("expected DeleteByUserID on token repo to be called")
+	}
+	if !deleteUserCalled {
+		t.Error("expected Delete on user repo to be called")
+	}
+}
+
+func TestDeleteAccount_AppleUser_MissingCode(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+
 	userRepo := &mockUserRepository{
+		findByIDFn: func(_ context.Context, id uuid.UUID) (*model.User, error) {
+			return &model.User{ID: userID, Provider: "apple", ProviderSub: "apple-123"}, nil
+		},
+	}
+
+	svc := NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+
+	err := svc.DeleteAccount(context.Background(), userID, "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, model.ErrInvalidAuthCode) {
+		t.Fatalf("expected ErrInvalidAuthCode, got: %v", err)
+	}
+}
+
+func TestDeleteAccount_AppleUser_RevokeSuccess(t *testing.T) {
+	userID := uuid.Must(uuid.NewV7())
+	idToken := createTestIDToken(t, "apple-user-123", "test@apple.com")
+
+	// Mock Apple token endpoint (exchange) + revoke endpoint
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		grantType := r.FormValue("grant_type")
+
+		if grantType == "authorization_code" {
+			// Token exchange response
+			json.NewEncoder(w).Encode(map[string]string{
+				"access_token":  "mock-access-token",
+				"refresh_token": "mock-refresh-token",
+				"id_token":      idToken,
+				"token_type":    "Bearer",
+			})
+			return
+		}
+
+		// Revoke endpoint - check token was passed
+		token := r.FormValue("token")
+		if token != "mock-refresh-token" {
+			t.Errorf("expected revoke token 'mock-refresh-token', got '%s'", token)
+		}
+		tokenTypeHint := r.FormValue("token_type_hint")
+		if tokenTypeHint != "refresh_token" {
+			t.Errorf("expected token_type_hint 'refresh_token', got '%s'", tokenTypeHint)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockServer.Close()
+
+	appleClient := newTestAppleClient()
+	appleClient.SetTokenURL(mockServer.URL)
+	appleClient.SetRevokeURL(mockServer.URL)
+
+	deleteTokensCalled := false
+	deleteUserCalled := false
+
+	userRepo := &mockUserRepository{
+		findByIDFn: func(_ context.Context, id uuid.UUID) (*model.User, error) {
+			return &model.User{ID: userID, Provider: "apple", ProviderSub: "apple-123"}, nil
+		},
 		deleteFn: func(_ context.Context, id uuid.UUID) error {
 			deleteUserCalled = true
-			if id != userID {
-				t.Errorf("expected userID %s, got %s", userID, id)
-			}
 			return nil
 		},
 	}
 
-	svc := NewAuthService(userRepo, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	tokenRepo := &mockTokenRepository{
+		deleteByUserIDFn: func(_ context.Context, id uuid.UUID) error {
+			deleteTokensCalled = true
+			return nil
+		},
+	}
 
-	err := svc.DeleteAccount(context.Background(), userID)
+	svc := NewAuthService(userRepo, tokenRepo, newTestJWTManager(), appleClient, newTestKakaoClient())
+
+	err := svc.DeleteAccount(context.Background(), userID, "valid-auth-code")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
