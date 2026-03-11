@@ -8,8 +8,12 @@ import (
 
 // AppleLoginRequest is the request body for Apple Sign In.
 type AppleLoginRequest struct {
-	Code    string `json:"code"`
-	IDToken string `json:"idToken" binding:"required"`
+	Code string `json:"code" binding:"required"`
+}
+
+// KakaoLoginRequest is the request body for Kakao login.
+type KakaoLoginRequest struct {
+	Code string `json:"code" binding:"required"`
 }
 
 // RefreshRequest is the request body for token refresh.

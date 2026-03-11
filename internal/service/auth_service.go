@@ -14,7 +14,8 @@ import (
 
 // AuthService defines the interface for authentication business logic.
 type AuthService interface {
-	AppleLogin(ctx context.Context, idToken string) (*model.User, *jwt.TokenPair, error)
+	AppleLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error)
+	KakaoLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
 	Logout(ctx context.Context, userID uuid.UUID) error
 	GetCurrentUser(ctx context.Context, userID uuid.UUID) (*model.User, error)
@@ -22,10 +23,11 @@ type AuthService interface {
 }
 
 type authService struct {
-	userRepo      repository.UserRepository
-	tokenRepo     repository.TokenRepository
-	jwtManager    *jwt.Manager
-	appleVerifier *oauth.AppleVerifier
+	userRepo    repository.UserRepository
+	tokenRepo   repository.TokenRepository
+	jwtManager  *jwt.Manager
+	appleClient *oauth.AppleClient
+	kakaoClient *oauth.KakaoClient
 }
 
 // NewAuthService creates a new AuthService.
@@ -33,23 +35,25 @@ func NewAuthService(
 	userRepo repository.UserRepository,
 	tokenRepo repository.TokenRepository,
 	jwtManager *jwt.Manager,
-	appleVerifier *oauth.AppleVerifier,
+	appleClient *oauth.AppleClient,
+	kakaoClient *oauth.KakaoClient,
 ) AuthService {
 	return &authService{
-		userRepo:      userRepo,
-		tokenRepo:     tokenRepo,
-		jwtManager:    jwtManager,
-		appleVerifier: appleVerifier,
+		userRepo:    userRepo,
+		tokenRepo:   tokenRepo,
+		jwtManager:  jwtManager,
+		appleClient: appleClient,
+		kakaoClient: kakaoClient,
 	}
 }
 
-func (s *authService) AppleLogin(ctx context.Context, idToken string) (*model.User, *jwt.TokenPair, error) {
-	claims, err := s.appleVerifier.Verify(ctx, idToken)
+func (s *authService) AppleLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error) {
+	info, err := s.appleClient.ExchangeAndGetUser(ctx, code)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", model.ErrInvalidIDToken, err)
+		return nil, nil, fmt.Errorf("%w: %v", model.ErrInvalidAuthCode, err)
 	}
 
-	user, err := s.userRepo.FindByProviderSub(ctx, "apple", claims.Sub)
+	user, err := s.userRepo.FindByProviderSub(ctx, "apple", info.Sub)
 	if err != nil {
 		return nil, nil, fmt.Errorf("find user: %w", err)
 	}
@@ -60,8 +64,8 @@ func (s *authService) AppleLogin(ctx context.Context, idToken string) (*model.Us
 		user = &model.User{
 			ID:          uuid.Must(uuid.NewV7()),
 			Provider:    "apple",
-			ProviderSub: claims.Sub,
-			Email:       claims.Email,
+			ProviderSub: info.Sub,
+			Email:       info.Email,
 			LastLoginAt: &now,
 		}
 		if err := s.userRepo.Create(ctx, user); err != nil {
@@ -70,8 +74,8 @@ func (s *authService) AppleLogin(ctx context.Context, idToken string) (*model.Us
 	} else {
 		// Existing user - update login time and email if provided
 		user.LastLoginAt = &now
-		if claims.Email != nil {
-			user.Email = claims.Email
+		if info.Email != nil {
+			user.Email = info.Email
 		}
 		if err := s.userRepo.Update(ctx, user); err != nil {
 			return nil, nil, fmt.Errorf("update user: %w", err)
@@ -84,6 +88,65 @@ func (s *authService) AppleLogin(ctx context.Context, idToken string) (*model.Us
 	}
 
 	// Store refresh token in DB
+	rt := &model.RefreshToken{
+		ID:        uuid.Must(uuid.NewV7()),
+		UserID:    user.ID,
+		Token:     tokenPair.RefreshToken,
+		ExpiresAt: now.Add(720 * time.Hour),
+	}
+	if err := s.tokenRepo.Create(ctx, rt); err != nil {
+		return nil, nil, fmt.Errorf("store refresh token: %w", err)
+	}
+
+	return user, tokenPair, nil
+}
+
+func (s *authService) KakaoLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error) {
+	info, err := s.kakaoClient.ExchangeAndGetUser(ctx, code)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %v", model.ErrInvalidAuthCode, err)
+	}
+
+	user, err := s.userRepo.FindByProviderSub(ctx, "kakao", info.Sub)
+	if err != nil {
+		return nil, nil, fmt.Errorf("find user: %w", err)
+	}
+
+	now := time.Now()
+	if user == nil {
+		user = &model.User{
+			ID:           uuid.Must(uuid.NewV7()),
+			Provider:     "kakao",
+			ProviderSub:  info.Sub,
+			Email:        info.Email,
+			Nickname:     info.Nickname,
+			ProfileImage: info.ProfileImage,
+			LastLoginAt:  &now,
+		}
+		if err := s.userRepo.Create(ctx, user); err != nil {
+			return nil, nil, fmt.Errorf("create user: %w", err)
+		}
+	} else {
+		user.LastLoginAt = &now
+		if info.Email != nil {
+			user.Email = info.Email
+		}
+		if info.Nickname != nil {
+			user.Nickname = info.Nickname
+		}
+		if info.ProfileImage != nil {
+			user.ProfileImage = info.ProfileImage
+		}
+		if err := s.userRepo.Update(ctx, user); err != nil {
+			return nil, nil, fmt.Errorf("update user: %w", err)
+		}
+	}
+
+	tokenPair, err := s.jwtManager.GenerateTokenPair(user.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate tokens: %w", err)
+	}
+
 	rt := &model.RefreshToken{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    user.ID,

@@ -14,7 +14,6 @@ var (
 
 	// Auth errors
 	ErrInvalidAuthCode          = errors.New("invalid authorization code")
-	ErrInvalidIDToken           = errors.New("invalid id token")
 	ErrInvalidAccessToken       = errors.New("invalid or expired access token")
 	ErrInvalidRefreshToken      = errors.New("invalid or expired refresh token")
 	ErrUserNotFound             = errors.New("user not found")

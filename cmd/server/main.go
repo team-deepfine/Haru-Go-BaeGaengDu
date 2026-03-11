@@ -60,13 +60,21 @@ func main() {
 	// Initialize JWT manager
 	jwtManager := jwtpkg.NewManager(cfg.JWT.Secret, accessExpiry, refreshExpiry)
 
-	// Initialize Apple verifier
-	appleVerifier := oauth.NewAppleVerifier(cfg.Apple.ClientID)
+	// Initialize OAuth providers
+	appleClient, err := oauth.NewAppleClient(
+		cfg.Apple.ClientID, cfg.Apple.TeamID, cfg.Apple.KeyID,
+		cfg.Apple.PrivateKey, cfg.Apple.RedirectURI,
+	)
+	if err != nil {
+		slog.Error("failed to create apple client", "error", err)
+		os.Exit(1)
+	}
+	kakaoClient := oauth.NewKakaoClient(cfg.Kakao.ClientID, cfg.Kakao.ClientSecret, cfg.Kakao.RedirectURI)
 
 	// Wire auth dependencies
 	userRepo := repository.NewUserRepository(db)
 	tokenRepo := repository.NewTokenRepository(db)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleVerifier)
+	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	// Wire event dependencies

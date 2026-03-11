@@ -2,196 +2,195 @@ package oauth
 
 import (
 	"context"
-	"crypto/rsa"
-	"encoding/base64"
+	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net/http"
-	"sync"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const appleKeysURL = "https://appleid.apple.com/auth/keys"
-const appleIssuer = "https://appleid.apple.com"
+const appleTokenURL = "https://appleid.apple.com/auth/token"
 
-// AppleIDTokenClaims holds the verified claims from an Apple id_token.
-type AppleIDTokenClaims struct {
+// AppleUserInfo holds user information extracted from Apple's token response.
+type AppleUserInfo struct {
 	Sub   string  // Apple user ID
 	Email *string // user email (may be nil after first login)
 }
 
-// AppleVerifier verifies Apple Sign In id_tokens using Apple's public keys.
-type AppleVerifier struct {
-	clientID   string
-	mu         sync.RWMutex
-	keys       map[string]*rsa.PublicKey
-	fetchedAt  time.Time
-	cacheTTL   time.Duration
-	httpClient *http.Client
+// AppleClient exchanges Apple authorization codes for user information.
+type AppleClient struct {
+	clientID    string
+	teamID      string
+	keyID       string
+	privateKey  *ecdsa.PrivateKey
+	redirectURI string
+	tokenURL    string
+	httpClient  *http.Client
 }
 
-// NewAppleVerifier creates a new Apple id_token verifier.
-func NewAppleVerifier(clientID string) *AppleVerifier {
-	return &AppleVerifier{
-		clientID:   clientID,
-		keys:       make(map[string]*rsa.PublicKey),
-		cacheTTL:   24 * time.Hour,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+// NewAppleClient creates a new Apple OAuth client.
+// privateKeyPEM is the PEM-encoded ES256 private key from Apple Developer.
+func NewAppleClient(clientID, teamID, keyID, privateKeyPEM, redirectURI string) (*AppleClient, error) {
+	privKey, err := parseECPrivateKey(privateKeyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("parse apple private key: %w", err)
 	}
+
+	return &AppleClient{
+		clientID:    clientID,
+		teamID:      teamID,
+		keyID:       keyID,
+		privateKey:  privKey,
+		redirectURI: redirectURI,
+		tokenURL:    appleTokenURL,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+	}, nil
 }
 
-// Verify validates an Apple id_token JWT and returns the extracted claims.
-func (v *AppleVerifier) Verify(ctx context.Context, idToken string) (*AppleIDTokenClaims, error) {
-	// Parse the token header to get the kid
+// SetTokenURL overrides the Apple token endpoint URL (for testing).
+func (a *AppleClient) SetTokenURL(url string) {
+	a.tokenURL = url
+}
+
+// ExchangeAndGetUser exchanges an authorization code for an Apple access token,
+// then extracts user info from the returned id_token.
+func (a *AppleClient) ExchangeAndGetUser(ctx context.Context, code string) (*AppleUserInfo, error) {
+	clientSecret, err := a.generateClientSecret()
+	if err != nil {
+		return nil, fmt.Errorf("generate client secret: %w", err)
+	}
+
+	tokenResp, err := a.exchangeCode(ctx, code, clientSecret)
+	if err != nil {
+		return nil, err
+	}
+
+	return a.decodeIDToken(tokenResp.IDToken)
+}
+
+// generateClientSecret creates a JWT client_secret signed with ES256.
+func (a *AppleClient) generateClientSecret() (string, error) {
+	now := time.Now()
+	claims := jwt.RegisteredClaims{
+		Issuer:    a.teamID,
+		Subject:   a.clientID,
+		Audience:  jwt.ClaimStrings{"https://appleid.apple.com"},
+		IssuedAt:  jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["kid"] = a.keyID
+
+	return token.SignedString(a.privateKey)
+}
+
+// exchangeCode posts the authorization code to Apple's token endpoint.
+func (a *AppleClient) exchangeCode(ctx context.Context, code, clientSecret string) (*appleTokenResponse, error) {
+	data := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {a.clientID},
+		"client_secret": {clientSecret},
+		"code":          {code},
+	}
+	if a.redirectURI != "" {
+		data.Set("redirect_uri", a.redirectURI)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("create token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("apple token request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("apple token endpoint returned status %d", resp.StatusCode)
+	}
+
+	var tokenResp appleTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("decode token response: %w", err)
+	}
+
+	if tokenResp.IDToken == "" {
+		return nil, fmt.Errorf("empty id_token in apple response")
+	}
+
+	return &tokenResp, nil
+}
+
+// decodeIDToken extracts claims from the id_token without signature verification.
+// This is safe because the token was received directly from Apple over HTTPS.
+func (a *AppleClient) decodeIDToken(idToken string) (*AppleUserInfo, error) {
 	parser := jwt.NewParser()
 	token, _, err := parser.ParseUnverified(idToken, jwt.MapClaims{})
 	if err != nil {
-		return nil, fmt.Errorf("parse id_token header: %w", err)
+		return nil, fmt.Errorf("parse id_token: %w", err)
 	}
 
-	kid, ok := token.Header["kid"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing kid in token header")
-	}
-
-	// Get the public key for this kid
-	pubKey, err := v.getPublicKey(ctx, kid)
-	if err != nil {
-		return nil, fmt.Errorf("get apple public key: %w", err)
-	}
-
-	// Verify the token
-	verified, err := jwt.Parse(idToken, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return pubKey, nil
-	},
-		jwt.WithIssuer(appleIssuer),
-		jwt.WithAudience(v.clientID),
-		jwt.WithLeeway(30*time.Second),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("verify id_token: %w", err)
-	}
-
-	claims, ok := verified.Claims.(jwt.MapClaims)
+	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, fmt.Errorf("invalid token claims")
 	}
 
 	sub, ok := claims["sub"].(string)
 	if !ok || sub == "" {
-		return nil, fmt.Errorf("missing sub claim")
+		return nil, fmt.Errorf("missing sub claim in id_token")
 	}
 
-	result := &AppleIDTokenClaims{Sub: sub}
+	info := &AppleUserInfo{Sub: sub}
 	if email, ok := claims["email"].(string); ok && email != "" {
-		result.Email = &email
+		info.Email = &email
 	}
 
-	return result, nil
+	return info, nil
 }
 
-func (v *AppleVerifier) getPublicKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
-	// Try cache first
-	v.mu.RLock()
-	key, found := v.keys[kid]
-	expired := time.Since(v.fetchedAt) > v.cacheTTL
-	v.mu.RUnlock()
+// parseECPrivateKey parses a PEM-encoded EC private key.
+// Handles escaped newlines (\n) commonly found in environment variables.
+func parseECPrivateKey(pemStr string) (*ecdsa.PrivateKey, error) {
+	pemStr = strings.ReplaceAll(pemStr, `\n`, "\n")
 
-	if found && !expired {
-		return key, nil
+	block, _ := pem.Decode([]byte(pemStr))
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
 	}
 
-	// Fetch fresh keys
-	if err := v.fetchKeys(ctx); err != nil {
-		return nil, err
-	}
-
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	key, found = v.keys[kid]
-	if !found {
-		return nil, fmt.Errorf("apple public key not found for kid: %s", kid)
-	}
-	return key, nil
-}
-
-type appleJWKSet struct {
-	Keys []appleJWK `json:"keys"`
-}
-
-type appleJWK struct {
-	KTY string `json:"kty"`
-	KID string `json:"kid"`
-	Use string `json:"use"`
-	Alg string `json:"alg"`
-	N   string `json:"n"`
-	E   string `json:"e"`
-}
-
-func (v *AppleVerifier) fetchKeys(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, appleKeysURL, nil)
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := v.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch apple keys: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("apple keys endpoint returned status %d", resp.StatusCode)
-	}
-
-	var jwkSet appleJWKSet
-	if err := json.NewDecoder(resp.Body).Decode(&jwkSet); err != nil {
-		return fmt.Errorf("decode apple keys: %w", err)
-	}
-
-	keys := make(map[string]*rsa.PublicKey, len(jwkSet.Keys))
-	for _, jwk := range jwkSet.Keys {
-		if jwk.KTY != "RSA" {
-			continue
+		ecKey, ecErr := x509.ParseECPrivateKey(block.Bytes)
+		if ecErr != nil {
+			return nil, fmt.Errorf("parse private key (PKCS8: %v, EC: %v)", err, ecErr)
 		}
-		pubKey, err := jwkToRSAPublicKey(jwk)
-		if err != nil {
-			continue
-		}
-		keys[jwk.KID] = pubKey
+		return ecKey, nil
 	}
 
-	v.mu.Lock()
-	v.keys = keys
-	v.fetchedAt = time.Now()
-	v.mu.Unlock()
+	ecKey, ok := key.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("private key is not ECDSA")
+	}
 
-	return nil
+	return ecKey, nil
 }
 
-func jwkToRSAPublicKey(jwk appleJWK) (*rsa.PublicKey, error) {
-	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
-	if err != nil {
-		return nil, fmt.Errorf("decode modulus: %w", err)
-	}
+// Apple API response types (unexported).
 
-	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
-	if err != nil {
-		return nil, fmt.Errorf("decode exponent: %w", err)
-	}
-
-	n := new(big.Int).SetBytes(nBytes)
-	e := new(big.Int).SetBytes(eBytes)
-
-	return &rsa.PublicKey{
-		N: n,
-		E: int(e.Int64()),
-	}, nil
+type appleTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
 }

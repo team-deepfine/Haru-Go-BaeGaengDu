@@ -26,6 +26,7 @@ func NewAuthHandler(svc service.AuthService) *AuthHandler {
 // RegisterPublicRoutes registers auth routes that do NOT require authentication.
 func (h *AuthHandler) RegisterPublicRoutes(rg *gin.RouterGroup) {
 	rg.POST("/auth/apple", h.AppleLogin)
+	rg.POST("/auth/kakao", h.KakaoLogin)
 	rg.POST("/auth/refresh", h.Refresh)
 }
 
@@ -40,11 +41,33 @@ func (h *AuthHandler) RegisterProtectedRoutes(rg *gin.RouterGroup) {
 func (h *AuthHandler) AppleLogin(c *gin.Context) {
 	var req dto.AppleLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "idToken is required")
+		response.Error(c, http.StatusBadRequest, "code is required")
 		return
 	}
 
-	user, tokenPair, err := h.svc.AppleLogin(c.Request.Context(), req.IDToken)
+	user, tokenPair, err := h.svc.AppleLogin(c.Request.Context(), req.Code)
+	if err != nil {
+		handleAuthError(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, dto.AuthResponse{
+		AccessToken:  tokenPair.AccessToken,
+		RefreshToken: tokenPair.RefreshToken,
+		ExpiresIn:    tokenPair.ExpiresIn,
+		User:         dto.ToUserResponse(user),
+	})
+}
+
+// KakaoLogin handles POST /api/auth/kakao.
+func (h *AuthHandler) KakaoLogin(c *gin.Context) {
+	var req dto.KakaoLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	user, tokenPair, err := h.svc.KakaoLogin(c.Request.Context(), req.Code)
 	if err != nil {
 		handleAuthError(c, err)
 		return
@@ -131,7 +154,7 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 
 func handleAuthError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, model.ErrInvalidIDToken):
+	case errors.Is(err, model.ErrInvalidAuthCode):
 		response.Error(c, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, model.ErrInvalidRefreshToken):
 		response.Error(c, http.StatusUnauthorized, err.Error())
