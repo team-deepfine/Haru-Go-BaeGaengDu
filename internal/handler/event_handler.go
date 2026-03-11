@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/daewon/haru/internal/dto"
+	"github.com/daewon/haru/internal/middleware"
 	"github.com/daewon/haru/internal/model"
 	"github.com/daewon/haru/internal/service"
 	"github.com/daewon/haru/pkg/response"
@@ -35,6 +36,12 @@ func (h *EventHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 // Create handles POST /api/events.
 func (h *EventHandler) Create(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
 	var req dto.CreateEventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
@@ -47,7 +54,7 @@ func (h *EventHandler) Create(c *gin.Context) {
 		return
 	}
 
-	event, err := h.svc.CreateEvent(c.Request.Context(), input)
+	event, err := h.svc.CreateEvent(c.Request.Context(), userID, input)
 	if err != nil {
 		handleServiceError(c, err)
 		return
@@ -58,13 +65,19 @@ func (h *EventHandler) Create(c *gin.Context) {
 
 // GetByID handles GET /api/events/:id.
 func (h *EventHandler) GetByID(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid event ID format")
 		return
 	}
 
-	event, err := h.svc.GetEvent(c.Request.Context(), id)
+	event, err := h.svc.GetEvent(c.Request.Context(), userID, id)
 	if err != nil {
 		handleServiceError(c, err)
 		return
@@ -75,6 +88,12 @@ func (h *EventHandler) GetByID(c *gin.Context) {
 
 // List handles GET /api/events?start=&end=.
 func (h *EventHandler) List(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
 	startStr := c.Query("start")
 	endStr := c.Query("end")
 
@@ -94,7 +113,7 @@ func (h *EventHandler) List(c *gin.Context) {
 		return
 	}
 
-	events, err := h.svc.ListEvents(c.Request.Context(), start, end)
+	events, err := h.svc.ListEvents(c.Request.Context(), userID, start, end)
 	if err != nil {
 		handleServiceError(c, err)
 		return
@@ -105,6 +124,12 @@ func (h *EventHandler) List(c *gin.Context) {
 
 // Update handles PUT /api/events/:id.
 func (h *EventHandler) Update(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid event ID format")
@@ -123,7 +148,7 @@ func (h *EventHandler) Update(c *gin.Context) {
 		return
 	}
 
-	event, err := h.svc.UpdateEvent(c.Request.Context(), id, input)
+	event, err := h.svc.UpdateEvent(c.Request.Context(), userID, id, input)
 	if err != nil {
 		handleServiceError(c, err)
 		return
@@ -134,13 +159,19 @@ func (h *EventHandler) Update(c *gin.Context) {
 
 // Delete handles DELETE /api/events/:id.
 func (h *EventHandler) Delete(c *gin.Context) {
+	userID, ok := middleware.GetUserID(c)
+	if !ok {
+		response.Error(c, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, "invalid event ID format")
 		return
 	}
 
-	if err := h.svc.DeleteEvent(c.Request.Context(), id); err != nil {
+	if err := h.svc.DeleteEvent(c.Request.Context(), userID, id); err != nil {
 		handleServiceError(c, err)
 		return
 	}

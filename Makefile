@@ -1,4 +1,4 @@
-.PHONY: build run test lint clean tidy fmt docker-up docker-down docker-logs
+.PHONY: build run test test-integration lint clean tidy fmt docker-up docker-down docker-logs
 
 APP_NAME := haru
 BUILD_DIR := ./bin
@@ -11,6 +11,9 @@ run:
 
 test:
 	go test ./... -v -count=1
+
+test-integration:
+	go test -v -count=1 ./tests/
 
 lint:
 	golangci-lint run ./...

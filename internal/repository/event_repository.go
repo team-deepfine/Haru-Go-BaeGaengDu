@@ -13,10 +13,10 @@ import (
 // EventRepository defines the interface for event data access.
 type EventRepository interface {
 	Create(ctx context.Context, event *model.Event) error
-	FindByID(ctx context.Context, id uuid.UUID) (*model.Event, error)
-	FindByDateRange(ctx context.Context, start, end time.Time) ([]model.Event, error)
+	FindByID(ctx context.Context, userID, id uuid.UUID) (*model.Event, error)
+	FindByDateRange(ctx context.Context, userID uuid.UUID, start, end time.Time) ([]model.Event, error)
 	Update(ctx context.Context, event *model.Event) error
-	Delete(ctx context.Context, id uuid.UUID) error
+	Delete(ctx context.Context, userID, id uuid.UUID) error
 }
 
 type eventRepository struct {
@@ -35,9 +35,9 @@ func (r *eventRepository) Create(ctx context.Context, event *model.Event) error 
 	return nil
 }
 
-func (r *eventRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Event, error) {
+func (r *eventRepository) FindByID(ctx context.Context, userID, id uuid.UUID) (*model.Event, error) {
 	var event model.Event
-	err := r.db.WithContext(ctx).First(&event, "id = ?", id).Error
+	err := r.db.WithContext(ctx).First(&event, "id = ? AND user_id = ?", id, userID).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return nil, model.ErrEventNotFound
@@ -47,10 +47,10 @@ func (r *eventRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.Ev
 	return &event, nil
 }
 
-func (r *eventRepository) FindByDateRange(ctx context.Context, start, end time.Time) ([]model.Event, error) {
+func (r *eventRepository) FindByDateRange(ctx context.Context, userID uuid.UUID, start, end time.Time) ([]model.Event, error) {
 	var events []model.Event
 	err := r.db.WithContext(ctx).
-		Where("start_at < ? AND end_at > ?", end, start).
+		Where("user_id = ? AND start_at < ? AND end_at > ?", userID, end, start).
 		Order("all_day DESC, start_at ASC").
 		Find(&events).Error
 	if err != nil {
@@ -66,8 +66,8 @@ func (r *eventRepository) Update(ctx context.Context, event *model.Event) error 
 	return nil
 }
 
-func (r *eventRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	result := r.db.WithContext(ctx).Delete(&model.Event{}, "id = ?", id)
+func (r *eventRepository) Delete(ctx context.Context, userID, id uuid.UUID) error {
+	result := r.db.WithContext(ctx).Delete(&model.Event{}, "id = ? AND user_id = ?", id, userID)
 	if result.Error != nil {
 		return fmt.Errorf("delete event: %w", result.Error)
 	}

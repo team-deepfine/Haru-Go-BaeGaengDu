@@ -12,6 +12,8 @@ type Config struct {
 	DB       DBConfig
 	LogLevel string
 	Gemini   GeminiConfig
+	JWT      JWTConfig
+	Apple    AppleConfig
 }
 
 // DBConfig holds database connection settings.
@@ -26,6 +28,21 @@ type GeminiConfig struct {
 	Model      string
 	Timezone   string
 	PromptPath string
+}
+
+// JWTConfig holds JWT signing and expiry settings.
+type JWTConfig struct {
+	Secret        string
+	AccessExpiry  string
+	RefreshExpiry string
+}
+
+// AppleConfig holds Apple Sign In OAuth settings.
+type AppleConfig struct {
+	ClientID   string
+	TeamID     string
+	KeyID      string
+	PrivateKey string
 }
 
 // Load reads configuration from environment variables (with .env fallback).
@@ -44,6 +61,17 @@ func Load() *Config {
 			Model:      getEnv("GEMINI_MODEL", "gemini-2.5-flash"),
 			Timezone:   getEnv("DEFAULT_TIMEZONE", "Asia/Seoul"),
 			PromptPath: getEnv("VOICE_PARSE_PROMPT_PATH", ""),
+		},
+		JWT: JWTConfig{
+			Secret:        getEnv("JWT_SECRET", ""),
+			AccessExpiry:  getEnv("JWT_ACCESS_EXPIRY", "1h"),
+			RefreshExpiry: getEnv("JWT_REFRESH_EXPIRY", "720h"),
+		},
+		Apple: AppleConfig{
+			ClientID:   getEnv("APPLE_CLIENT_ID", ""),
+			TeamID:     getEnv("APPLE_TEAM_ID", ""),
+			KeyID:      getEnv("APPLE_KEY_ID", ""),
+			PrivateKey: getEnv("APPLE_PRIVATE_KEY", ""),
 		},
 	}
 }

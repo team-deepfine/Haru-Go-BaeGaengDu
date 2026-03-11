@@ -46,6 +46,7 @@ func (a *Int64Array) Scan(value interface{}) error {
 // Event represents a calendar event.
 type Event struct {
 	ID              uuid.UUID  `gorm:"type:text;primaryKey" json:"id"`
+	UserID          uuid.UUID  `gorm:"type:text;not null;index" json:"-"`
 	Title           string     `gorm:"not null" json:"title"`
 	StartAt         time.Time  `gorm:"not null;index" json:"startAt"`
 	EndAt           time.Time  `gorm:"not null;index" json:"endAt"`

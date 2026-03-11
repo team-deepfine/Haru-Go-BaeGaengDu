@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *eventService) GetEvent(ctx context.Context, id uuid.UUID) (*model.Event, error) {
-	return s.repo.FindByID(ctx, id)
+func (s *eventService) GetEvent(ctx context.Context, userID, id uuid.UUID) (*model.Event, error) {
+	return s.repo.FindByID(ctx, userID, id)
 }
 
-func (s *eventService) ListEvents(ctx context.Context, start, end time.Time) ([]model.Event, error) {
-	return s.repo.FindByDateRange(ctx, start.UTC(), end.UTC())
+func (s *eventService) ListEvents(ctx context.Context, userID uuid.UUID, start, end time.Time) ([]model.Event, error) {
+	return s.repo.FindByDateRange(ctx, userID, start.UTC(), end.UTC())
 }

@@ -11,11 +11,11 @@ import (
 
 // EventService defines the interface for event business logic.
 type EventService interface {
-	CreateEvent(ctx context.Context, req CreateEventInput) (*model.Event, error)
-	GetEvent(ctx context.Context, id uuid.UUID) (*model.Event, error)
-	ListEvents(ctx context.Context, start, end time.Time) ([]model.Event, error)
-	UpdateEvent(ctx context.Context, id uuid.UUID, req CreateEventInput) (*model.Event, error)
-	DeleteEvent(ctx context.Context, id uuid.UUID) error
+	CreateEvent(ctx context.Context, userID uuid.UUID, req CreateEventInput) (*model.Event, error)
+	GetEvent(ctx context.Context, userID, id uuid.UUID) (*model.Event, error)
+	ListEvents(ctx context.Context, userID uuid.UUID, start, end time.Time) ([]model.Event, error)
+	UpdateEvent(ctx context.Context, userID, id uuid.UUID, req CreateEventInput) (*model.Event, error)
+	DeleteEvent(ctx context.Context, userID, id uuid.UUID) error
 }
 
 // CreateEventInput is the service-layer input for creating/updating an event.

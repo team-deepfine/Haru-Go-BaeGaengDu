@@ -17,11 +17,12 @@ func applyDefaults(req *CreateEventInput) {
 	}
 }
 
-func (s *eventService) CreateEvent(ctx context.Context, req CreateEventInput) (*model.Event, error) {
+func (s *eventService) CreateEvent(ctx context.Context, userID uuid.UUID, req CreateEventInput) (*model.Event, error) {
 	applyDefaults(&req)
 
 	event := &model.Event{
 		ID:              uuid.Must(uuid.NewV7()),
+		UserID:          userID,
 		Title:           req.Title,
 		StartAt:         req.StartAt.UTC(),
 		EndAt:           req.EndAt.UTC(),
@@ -45,10 +46,10 @@ func (s *eventService) CreateEvent(ctx context.Context, req CreateEventInput) (*
 	return event, nil
 }
 
-func (s *eventService) UpdateEvent(ctx context.Context, id uuid.UUID, req CreateEventInput) (*model.Event, error) {
+func (s *eventService) UpdateEvent(ctx context.Context, userID, id uuid.UUID, req CreateEventInput) (*model.Event, error) {
 	applyDefaults(&req)
 
-	event, err := s.repo.FindByID(ctx, id)
+	event, err := s.repo.FindByID(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +76,6 @@ func (s *eventService) UpdateEvent(ctx context.Context, id uuid.UUID, req Create
 	return event, nil
 }
 
-func (s *eventService) DeleteEvent(ctx context.Context, id uuid.UUID) error {
-	return s.repo.Delete(ctx, id)
+func (s *eventService) DeleteEvent(ctx context.Context, userID, id uuid.UUID) error {
+	return s.repo.Delete(ctx, userID, id)
 }
