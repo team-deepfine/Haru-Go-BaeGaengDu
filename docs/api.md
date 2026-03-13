@@ -286,6 +286,7 @@ curl -X POST http://localhost:8080/api/auth/logout \
 ### 5. 회원 탈퇴
 
 사용자의 모든 refresh token과 사용자 계정을 삭제합니다.
+Apple 사용자의 경우, Apple의 token revoke API를 호출하여 연결을 해제합니다.
 
 ```
 DELETE /api/auth/account
@@ -293,7 +294,26 @@ DELETE /api/auth/account
 
 **Headers:** `Authorization: Bearer {accessToken}`
 
-**Example**
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| code | string | Apple 사용자: O | Apple에서 새로 받은 authorization code (탈퇴용) |
+
+> **Apple 사용자:** 클라이언트는 탈퇴 전 `ASAuthorization`(`signInAsync`)으로 새 authorization code를 발급받아 전달해야 합니다. 서버는 이 code로 Apple 토큰을 교환한 뒤 revoke API를 호출합니다.
+
+**Example (Apple 사용자)**
+
+```bash
+curl -X DELETE http://localhost:8080/api/auth/account \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "c1a2b3d4e5f6..."
+  }'
+```
+
+**Example (Apple 외 사용자)**
 
 ```bash
 curl -X DELETE http://localhost:8080/api/auth/account \
@@ -303,6 +323,13 @@ curl -X DELETE http://localhost:8080/api/auth/account \
 **Response** `204 No Content`
 
 (응답 본문 없음)
+
+**Error**
+
+| Status | 조건 |
+|--------|------|
+| 401 | 인증 토큰 누락/만료, 또는 Apple 사용자가 `code`를 누락 |
+| 502 | Apple revoke API 호출 실패 |
 
 ---
 

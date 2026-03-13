@@ -117,6 +117,10 @@ func setupTestServer(t *testing.T) *testServer {
 }
 
 func createTestUser(t *testing.T, ts *testServer) testUser {
+	return createTestUserWithProvider(t, ts, "apple")
+}
+
+func createTestUserWithProvider(t *testing.T, ts *testServer, provider string) testUser {
 	t.Helper()
 	ctx := context.Background()
 	userID := uuid.Must(uuid.NewV7())
@@ -125,7 +129,7 @@ func createTestUser(t *testing.T, ts *testServer) testUser {
 
 	user := &model.User{
 		ID:          userID,
-		Provider:    "apple",
+		Provider:    provider,
 		ProviderSub: "sub-" + userID.String(),
 		Email:       &email,
 		LastLoginAt: &now,
@@ -280,8 +284,8 @@ func TestIntegration_AuthFlow(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, w2.Code)
 	})
 
-	t.Run("DELETE /api/auth/account removes user", func(t *testing.T) {
-		deleteUser := createTestUser(t, ts)
+	t.Run("DELETE /api/auth/account removes user (non-Apple)", func(t *testing.T) {
+		deleteUser := createTestUserWithProvider(t, ts, "kakao")
 
 		w := doRequest(ts, http.MethodDelete, "/api/auth/account", nil, deleteUser.AccessToken)
 		assert.Equal(t, http.StatusNoContent, w.Code)
@@ -289,6 +293,14 @@ func TestIntegration_AuthFlow(t *testing.T) {
 		// User no longer exists
 		w2 := doRequest(ts, http.MethodGet, "/api/auth/me", nil, deleteUser.AccessToken)
 		assert.Equal(t, http.StatusNotFound, w2.Code)
+	})
+
+	t.Run("DELETE /api/auth/account requires code for Apple user", func(t *testing.T) {
+		appleUser := createTestUser(t, ts)
+
+		// Apple user without auth code should fail
+		w := doRequest(ts, http.MethodDelete, "/api/auth/account", nil, appleUser.AccessToken)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
 	})
 }
 

@@ -16,6 +16,12 @@ type KakaoLoginRequest struct {
 	Code string `json:"code" binding:"required"`
 }
 
+// DeleteAccountRequest is the request body for account deletion.
+// Apple users must provide a fresh authorization code for token revocation.
+type DeleteAccountRequest struct {
+	Code string `json:"code"`
+}
+
 // RefreshRequest is the request body for token refresh.
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken" binding:"required"`

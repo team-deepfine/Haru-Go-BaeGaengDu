@@ -19,7 +19,7 @@ type AuthService interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
 	Logout(ctx context.Context, userID uuid.UUID) error
 	GetCurrentUser(ctx context.Context, userID uuid.UUID) (*model.User, error)
-	DeleteAccount(ctx context.Context, userID uuid.UUID) error
+	DeleteAccount(ctx context.Context, userID uuid.UUID, authCode string) error
 }
 
 type authService struct {
@@ -206,7 +206,25 @@ func (s *authService) GetCurrentUser(ctx context.Context, userID uuid.UUID) (*mo
 	return s.userRepo.FindByID(ctx, userID)
 }
 
-func (s *authService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+func (s *authService) DeleteAccount(ctx context.Context, userID uuid.UUID, authCode string) error {
+	user, err := s.userRepo.FindByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("find user: %w", err)
+	}
+	if user == nil {
+		return model.ErrUserNotFound
+	}
+
+	// Apple 사용자: authorization code로 token revoke 호출
+	if user.Provider == "apple" {
+		if authCode == "" {
+			return fmt.Errorf("%w: apple users must provide authorization code for account deletion", model.ErrInvalidAuthCode)
+		}
+		if err := s.appleClient.RevokeByAuthCode(ctx, authCode); err != nil {
+			return fmt.Errorf("apple token revoke: %w", err)
+		}
+	}
+
 	if err := s.tokenRepo.DeleteByUserID(ctx, userID); err != nil {
 		return fmt.Errorf("delete tokens: %w", err)
 	}

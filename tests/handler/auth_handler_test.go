@@ -1,4 +1,4 @@
-package handler
+package handler_test
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/daewon/haru/internal/dto"
+	"github.com/daewon/haru/internal/handler"
 	"github.com/daewon/haru/internal/middleware"
 	"github.com/daewon/haru/internal/model"
 	"github.com/daewon/haru/pkg/jwt"
@@ -32,7 +33,7 @@ type mockAuthService struct {
 	refreshTokenFn   func(ctx context.Context, refreshToken string) (*jwt.TokenPair, error)
 	logoutFn         func(ctx context.Context, userID uuid.UUID) error
 	getCurrentUserFn func(ctx context.Context, userID uuid.UUID) (*model.User, error)
-	deleteAccountFn  func(ctx context.Context, userID uuid.UUID) error
+	deleteAccountFn  func(ctx context.Context, userID uuid.UUID, authCode string) error
 }
 
 func (m *mockAuthService) AppleLogin(ctx context.Context, code string) (*model.User, *jwt.TokenPair, error) {
@@ -55,8 +56,8 @@ func (m *mockAuthService) GetCurrentUser(ctx context.Context, userID uuid.UUID) 
 	return m.getCurrentUserFn(ctx, userID)
 }
 
-func (m *mockAuthService) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
-	return m.deleteAccountFn(ctx, userID)
+func (m *mockAuthService) DeleteAccount(ctx context.Context, userID uuid.UUID, authCode string) error {
+	return m.deleteAccountFn(ctx, userID, authCode)
 }
 
 // --- Test helpers ---
@@ -85,7 +86,7 @@ func newTestTokenPair() *jwt.TokenPair {
 
 func setupPublicRouter(svc *mockAuthService) *gin.Engine {
 	r := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	api := r.Group("/api")
 	h.RegisterPublicRoutes(api)
 	return r
@@ -93,7 +94,7 @@ func setupPublicRouter(svc *mockAuthService) *gin.Engine {
 
 func setupProtectedRouter(svc *mockAuthService) *gin.Engine {
 	r := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	api := r.Group("/api")
 	h.RegisterProtectedRoutes(api)
 	return r
@@ -279,7 +280,7 @@ func TestMe_ValidUser(t *testing.T) {
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.GET("/api/auth/me", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
@@ -332,7 +333,7 @@ func TestLogout_Valid(t *testing.T) {
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.POST("/api/auth/logout", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
@@ -353,20 +354,50 @@ func TestDeleteAccount_Valid(t *testing.T) {
 	userID := uuid.New()
 
 	svc := &mockAuthService{
-		deleteAccountFn: func(_ context.Context, id uuid.UUID) error {
+		deleteAccountFn: func(_ context.Context, id uuid.UUID, authCode string) error {
 			assert.Equal(t, userID, id)
+			assert.Empty(t, authCode)
 			return nil
 		},
 	}
 
 	router := gin.New()
-	h := NewAuthHandler(svc)
+	h := handler.NewAuthHandler(svc)
 	router.DELETE("/api/auth/account", func(c *gin.Context) {
 		middleware.SetUserID(c, userID)
 		c.Next()
 	}, h.DeleteAccount)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Empty(t, w.Body.Bytes())
+}
+
+func TestDeleteAccount_WithAppleCode(t *testing.T) {
+	userID := uuid.New()
+
+	svc := &mockAuthService{
+		deleteAccountFn: func(_ context.Context, id uuid.UUID, authCode string) error {
+			assert.Equal(t, userID, id)
+			assert.Equal(t, "apple-auth-code", authCode)
+			return nil
+		},
+	}
+
+	router := gin.New()
+	h := handler.NewAuthHandler(svc)
+	router.DELETE("/api/auth/account", func(c *gin.Context) {
+		middleware.SetUserID(c, userID)
+		c.Next()
+	}, h.DeleteAccount)
+
+	reqBody := jsonBody(t, dto.DeleteAccountRequest{Code: "apple-auth-code"})
+	req := httptest.NewRequest(http.MethodDelete, "/api/auth/account", reqBody)
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
 	router.ServeHTTP(w, req)

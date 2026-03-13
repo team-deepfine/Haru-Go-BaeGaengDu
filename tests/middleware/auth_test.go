@@ -1,4 +1,4 @@
-package middleware
+package middleware_test
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 
 	jwtlib "github.com/golang-jwt/jwt/v5"
 
+	"github.com/daewon/haru/internal/middleware"
 	"github.com/daewon/haru/pkg/jwt"
 	"github.com/daewon/haru/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -27,8 +28,8 @@ func newTestJWTManager() *jwt.Manager {
 
 func setupAuthRouter(jwtManager *jwt.Manager) *gin.Engine {
 	r := gin.New()
-	r.GET("/protected", AuthRequired(jwtManager), func(c *gin.Context) {
-		userID, ok := GetUserID(c)
+	r.GET("/protected", middleware.AuthRequired(jwtManager), func(c *gin.Context) {
+		userID, ok := middleware.GetUserID(c)
 		if !ok {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "userID not found"})
 			return
@@ -170,7 +171,7 @@ func TestAuthRequired_MalformedToken(t *testing.T) {
 			token: "eyJhbGciOiJIUzI1NiJ9.tampered.payload",
 		},
 		{
-			name:  "signed with different secret",
+			name: "signed with different secret",
 			token: func() string {
 				otherManager := jwt.NewManager("different-secret", time.Hour, 720*time.Hour)
 				pair, _ := otherManager.GenerateTokenPair(uuid.New())

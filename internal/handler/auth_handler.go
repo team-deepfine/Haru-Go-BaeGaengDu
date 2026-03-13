@@ -144,7 +144,11 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.DeleteAccount(c.Request.Context(), userID); err != nil {
+	var req dto.DeleteAccountRequest
+	// body가 없어도 허용 (Apple이 아닌 사용자)
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.svc.DeleteAccount(c.Request.Context(), userID, req.Code); err != nil {
 		handleAuthError(c, err)
 		return
 	}
@@ -155,6 +159,7 @@ func (h *AuthHandler) DeleteAccount(c *gin.Context) {
 func handleAuthError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrInvalidAuthCode):
+		slog.Error("auth code exchange failed", "error", err)
 		response.Error(c, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, model.ErrInvalidRefreshToken):
 		response.Error(c, http.StatusUnauthorized, err.Error())

@@ -1,13 +1,15 @@
-package jwt
+package jwt_test
 
 import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	jwtlib "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	harujwt "github.com/daewon/haru/pkg/jwt"
 )
 
 func TestGenerateTokenPair(t *testing.T) {
@@ -30,7 +32,7 @@ func TestGenerateTokenPair(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager("test-secret-key", tt.accessExpiry, tt.refreshExpiry)
+			m := harujwt.NewManager("test-secret-key", tt.accessExpiry, tt.refreshExpiry)
 			userID := uuid.New()
 
 			pair, err := m.GenerateTokenPair(userID)
@@ -45,7 +47,7 @@ func TestGenerateTokenPair(t *testing.T) {
 }
 
 func TestValidateToken_ValidAccessToken(t *testing.T) {
-	m := NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
+	m := harujwt.NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
 	userID := uuid.New()
 
 	pair, err := m.GenerateTokenPair(userID)
@@ -58,7 +60,7 @@ func TestValidateToken_ValidAccessToken(t *testing.T) {
 }
 
 func TestValidateToken_ValidRefreshToken(t *testing.T) {
-	m := NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
+	m := harujwt.NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
 	userID := uuid.New()
 
 	pair, err := m.GenerateTokenPair(userID)
@@ -71,19 +73,16 @@ func TestValidateToken_ValidRefreshToken(t *testing.T) {
 }
 
 func TestValidateToken_ExpiredToken(t *testing.T) {
-	// Use a very short expiry so the token expires immediately.
-	// The leeway is 30s, so we set expiry to 1ms and sleep briefly,
-	// then manually craft a token that is well past leeway.
-	m := NewManager("test-secret-key", 1*time.Millisecond, 1*time.Millisecond)
+	m := harujwt.NewManager("test-secret-key", 1*time.Millisecond, 1*time.Millisecond)
 	userID := uuid.New()
 
-	// Directly create an already-expired token using the internal method approach.
-	claims := jwt.RegisteredClaims{
+	// Directly create an already-expired token using the jwt library.
+	claims := jwtlib.RegisteredClaims{
 		Subject:   userID.String(),
-		IssuedAt:  jwt.NewNumericDate(time.Now().Add(-1 * time.Hour)),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(-31 * time.Second)), // expired beyond 30s leeway
+		IssuedAt:  jwtlib.NewNumericDate(time.Now().Add(-1 * time.Hour)),
+		ExpiresAt: jwtlib.NewNumericDate(time.Now().Add(-31 * time.Second)), // expired beyond 30s leeway
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, claims)
 	tokenString, err := token.SignedString([]byte("test-secret-key"))
 	require.NoError(t, err)
 
@@ -107,9 +106,9 @@ func TestValidateToken_TamperedToken(t *testing.T) {
 			token: "eyJhbGciOiJIUzI1NiJ9.tampered.payload",
 		},
 		{
-			name:  "modified signature",
+			name: "modified signature",
 			token: func() string {
-				m := NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
+				m := harujwt.NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
 				pair, _ := m.GenerateTokenPair(uuid.New())
 				// Flip the last character of the token to tamper with the signature
 				tokenBytes := []byte(pair.AccessToken)
@@ -125,7 +124,7 @@ func TestValidateToken_TamperedToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
+			m := harujwt.NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
 
 			_, err := m.ValidateToken(tt.token)
 
@@ -138,16 +137,16 @@ func TestValidateToken_WrongSigningMethod(t *testing.T) {
 	userID := uuid.New()
 
 	// Create a token with "none" signing method
-	claims := jwt.RegisteredClaims{
+	claims := jwtlib.RegisteredClaims{
 		Subject:   userID.String(),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
+		IssuedAt:  jwtlib.NewNumericDate(time.Now()),
+		ExpiresAt: jwtlib.NewNumericDate(time.Now().Add(15 * time.Minute)),
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodNone, claims)
-	tokenString, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	token := jwtlib.NewWithClaims(jwtlib.SigningMethodNone, claims)
+	tokenString, err := token.SignedString(jwtlib.UnsafeAllowNoneSignatureType)
 	require.NoError(t, err)
 
-	m := NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
+	m := harujwt.NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
 
 	_, err = m.ValidateToken(tokenString)
 
@@ -156,7 +155,7 @@ func TestValidateToken_WrongSigningMethod(t *testing.T) {
 }
 
 func TestValidateToken_EmptyString(t *testing.T) {
-	m := NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
+	m := harujwt.NewManager("test-secret-key", 15*time.Minute, 7*24*time.Hour)
 
 	_, err := m.ValidateToken("")
 
@@ -164,8 +163,8 @@ func TestValidateToken_EmptyString(t *testing.T) {
 }
 
 func TestValidateToken_WrongSecret(t *testing.T) {
-	generator := NewManager("secret-one", 15*time.Minute, 7*24*time.Hour)
-	validator := NewManager("secret-two", 15*time.Minute, 7*24*time.Hour)
+	generator := harujwt.NewManager("secret-one", 15*time.Minute, 7*24*time.Hour)
+	validator := harujwt.NewManager("secret-two", 15*time.Minute, 7*24*time.Hour)
 	userID := uuid.New()
 
 	pair, err := generator.GenerateTokenPair(userID)
