@@ -34,10 +34,25 @@ type CreateEventInput struct {
 }
 
 type eventService struct {
-	repo repository.EventRepository
+	repo     repository.EventRepository
+	notifier NotificationScheduler
+}
+
+// EventServiceOption configures optional dependencies on EventService.
+type EventServiceOption func(*eventService)
+
+// WithNotificationScheduler sets the notification scheduler for automatic scheduling.
+func WithNotificationScheduler(ns NotificationScheduler) EventServiceOption {
+	return func(s *eventService) {
+		s.notifier = ns
+	}
 }
 
 // NewEventService creates a new EventService.
-func NewEventService(repo repository.EventRepository) EventService {
-	return &eventService{repo: repo}
+func NewEventService(repo repository.EventRepository, opts ...EventServiceOption) EventService {
+	svc := &eventService{repo: repo}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/daewon/haru/internal/model"
 	"github.com/google/uuid"
@@ -10,7 +11,7 @@ import (
 
 func applyDefaults(req *CreateEventInput) {
 	if req.Timezone == "" {
-		req.Timezone = "UTC"
+		req.Timezone = "Asia/Seoul"
 	}
 	if req.ReminderOffsets == nil {
 		req.ReminderOffsets = []int64{180}
@@ -43,6 +44,13 @@ func (s *eventService) CreateEvent(ctx context.Context, userID uuid.UUID, req Cr
 	if err := s.repo.Create(ctx, event); err != nil {
 		return nil, fmt.Errorf("create event: %w", err)
 	}
+
+	if s.notifier != nil {
+		if err := s.notifier.ScheduleForEvent(ctx, event); err != nil {
+			slog.Error("failed to schedule notifications", "eventID", event.ID, "error", err)
+		}
+	}
+
 	return event, nil
 }
 
@@ -73,9 +81,26 @@ func (s *eventService) UpdateEvent(ctx context.Context, userID, id uuid.UUID, re
 	if err := s.repo.Update(ctx, event); err != nil {
 		return nil, err
 	}
+
+	if s.notifier != nil {
+		if err := s.notifier.RescheduleForEvent(ctx, event); err != nil {
+			slog.Error("failed to reschedule notifications", "eventID", event.ID, "error", err)
+		}
+	}
+
 	return event, nil
 }
 
 func (s *eventService) DeleteEvent(ctx context.Context, userID, id uuid.UUID) error {
-	return s.repo.Delete(ctx, userID, id)
+	if err := s.repo.Delete(ctx, userID, id); err != nil {
+		return err
+	}
+
+	if s.notifier != nil {
+		if err := s.notifier.CancelForEvent(ctx, id); err != nil {
+			slog.Error("failed to cancel notifications", "eventID", id, "error", err)
+		}
+	}
+
+	return nil
 }

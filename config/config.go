@@ -6,6 +6,12 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// FCMConfig holds Firebase Cloud Messaging settings.
+type FCMConfig struct {
+	CredentialsJSON string
+	Enabled         bool
+}
+
 // Config holds all application configuration loaded from environment variables.
 type Config struct {
 	Port     string
@@ -15,6 +21,7 @@ type Config struct {
 	JWT      JWTConfig
 	Apple    AppleConfig
 	Kakao    KakaoConfig
+	FCM      FCMConfig
 }
 
 // DBConfig holds database connection settings.
@@ -87,6 +94,10 @@ func Load() *Config {
 			ClientID:     getEnv("KAKAO_CLIENT_ID", ""),
 			ClientSecret: getEnv("KAKAO_CLIENT_SECRET", ""),
 			RedirectURI:  getEnv("KAKAO_REDIRECT_URI", ""),
+		},
+		FCM: FCMConfig{
+			CredentialsJSON: getEnv("FCM_CREDENTIALS_JSON", ""),
+			Enabled:         getEnv("FCM_ENABLED", "false") == "true",
 		},
 	}
 }

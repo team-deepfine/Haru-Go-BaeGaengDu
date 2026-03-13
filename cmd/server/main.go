@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/daewon/haru/config"
@@ -15,6 +18,7 @@ import (
 	"github.com/daewon/haru/internal/router"
 	"github.com/daewon/haru/internal/service"
 	"github.com/daewon/haru/pkg/database"
+	"github.com/daewon/haru/pkg/fcm"
 	"github.com/daewon/haru/pkg/gemini"
 	jwtpkg "github.com/daewon/haru/pkg/jwt"
 	"github.com/daewon/haru/pkg/oauth"
@@ -33,7 +37,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := db.AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.Event{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.User{}, &model.RefreshToken{}, &model.Event{},
+		&model.Notification{}, &model.DeviceToken{},
+	); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
@@ -77,10 +84,19 @@ func main() {
 	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
 	authHandler := handler.NewAuthHandler(authSvc)
 
-	// Wire event dependencies
+	// Wire notification dependencies
+	notifRepo := repository.NewNotificationRepository(db)
+	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+	notifScheduler := service.NewNotificationScheduler(notifRepo)
+
+	// Wire event dependencies (with notification scheduler)
 	eventRepo := repository.NewEventRepository(db)
-	eventSvc := service.NewEventService(eventRepo)
+	eventSvc := service.NewEventService(eventRepo, service.WithNotificationScheduler(notifScheduler))
 	eventHandler := handler.NewEventHandler(eventSvc)
+
+	// Wire device token dependencies
+	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo)
+	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
 
 	// Wire voice parsing dependencies
 	var voiceSvc service.VoiceParsingService
@@ -101,14 +117,60 @@ func main() {
 	}
 	voiceHandler := handler.NewVoiceHandler(voiceSvc)
 
-	r := router.New(jwtManager, authHandler, eventHandler, voiceHandler)
+	r := router.New(jwtManager, authHandler, eventHandler, voiceHandler, deviceTokenHandler)
 
-	addr := fmt.Sprintf(":%s", cfg.Port)
-	slog.Info("starting server", "addr", addr)
-	if err := r.Run(addr); err != nil {
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
+	// Start notification worker if FCM is enabled
+	var workerCancel context.CancelFunc
+	if cfg.FCM.Enabled {
+		fcmClient, err := fcm.NewClient(context.Background(), []byte(cfg.FCM.CredentialsJSON))
+		if err != nil {
+			slog.Error("failed to create FCM client", "error", err)
+			os.Exit(1)
+		}
+
+		worker := service.NewNotificationWorker(notifRepo, deviceTokenRepo, fcmClient)
+		workerCtx, cancel := context.WithCancel(context.Background())
+		workerCancel = cancel
+		go worker.Start(workerCtx)
+		slog.Info("notification worker enabled")
+	} else {
+		slog.Warn("FCM_ENABLED not set, notification worker disabled")
 	}
+
+	// Start HTTP server with graceful shutdown
+	addr := fmt.Sprintf(":%s", cfg.Port)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
+	}
+
+	go func() {
+		slog.Info("starting server", "addr", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	slog.Info("shutting down server...")
+
+	// Stop notification worker
+	if workerCancel != nil {
+		workerCancel()
+	}
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("server forced to shutdown", "error", err)
+	}
+
+	slog.Info("server exited")
 }
 
 // noopVoiceParsingService returns an error when GEMINI_API_KEY is not configured.

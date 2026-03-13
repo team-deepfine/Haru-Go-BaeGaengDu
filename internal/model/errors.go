@@ -18,4 +18,8 @@ var (
 	ErrInvalidRefreshToken      = errors.New("invalid or expired refresh token")
 	ErrUserNotFound             = errors.New("user not found")
 	ErrOAuthProviderUnavailable = errors.New("oauth provider unavailable")
+
+	// Notification errors
+	ErrDeviceTokenRequired = errors.New("device token is required")
+	ErrDeviceTokenNotFound = errors.New("device token not found")
 )

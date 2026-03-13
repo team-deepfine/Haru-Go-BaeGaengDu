@@ -51,7 +51,7 @@ type Event struct {
 	StartAt         time.Time  `gorm:"not null;index" json:"startAt"`
 	EndAt           time.Time  `gorm:"not null;index" json:"endAt"`
 	AllDay          bool       `gorm:"not null;default:false" json:"allDay"`
-	Timezone        string     `gorm:"not null;default:'UTC'" json:"timezone"`
+	Timezone        string     `gorm:"not null;default:'Asia/Seoul'" json:"timezone"`
 	LocationName    *string    `json:"locationName,omitempty"`
 	LocationAddress *string    `json:"locationAddress,omitempty"`
 	LocationLat     *float64   `json:"locationLat,omitempty"`

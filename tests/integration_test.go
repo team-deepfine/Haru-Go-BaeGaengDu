@@ -33,12 +33,14 @@ import (
 // ---------------------------------------------------------------------------
 
 type testServer struct {
-	engine     *gin.Engine
-	db         *gorm.DB
-	jwtManager *jwtpkg.Manager
-	userRepo   repository.UserRepository
-	tokenRepo  repository.TokenRepository
-	eventRepo  repository.EventRepository
+	engine          *gin.Engine
+	db              *gorm.DB
+	jwtManager      *jwtpkg.Manager
+	userRepo        repository.UserRepository
+	tokenRepo       repository.TokenRepository
+	eventRepo       repository.EventRepository
+	notifRepo       repository.NotificationRepository
+	deviceTokenRepo repository.DeviceTokenRepository
 }
 
 type testUser struct {
@@ -71,7 +73,7 @@ func setupTestServer(t *testing.T) *testServer {
 	})
 	require.NoError(t, err)
 
-	err = db.AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.Event{})
+	err = db.AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.Event{}, &model.Notification{}, &model.DeviceToken{})
 	require.NoError(t, err)
 
 	jwtManager := jwtpkg.NewManager("integration-test-secret", time.Hour, 720*time.Hour)
@@ -89,20 +91,28 @@ func setupTestServer(t *testing.T) *testServer {
 	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
 	authHandler := handler.NewAuthHandler(authSvc)
 
-	eventSvc := service.NewEventService(eventRepo)
+	notifRepo := repository.NewNotificationRepository(db)
+	notifScheduler := service.NewNotificationScheduler(notifRepo)
+	eventSvc := service.NewEventService(eventRepo, service.WithNotificationScheduler(notifScheduler))
 	eventHandler := handler.NewEventHandler(eventSvc)
 
 	voiceHandler := handler.NewVoiceHandler(&noopVoiceParsingService{})
 
-	engine := router.New(jwtManager, authHandler, eventHandler, voiceHandler)
+	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo)
+	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
+
+	engine := router.New(jwtManager, authHandler, eventHandler, voiceHandler, deviceTokenHandler)
 
 	return &testServer{
-		engine:     engine,
-		db:         db,
-		jwtManager: jwtManager,
-		userRepo:   userRepo,
-		tokenRepo:  tokenRepo,
-		eventRepo:  eventRepo,
+		engine:          engine,
+		db:              db,
+		jwtManager:      jwtManager,
+		userRepo:        userRepo,
+		tokenRepo:       tokenRepo,
+		eventRepo:       eventRepo,
+		notifRepo:       notifRepo,
+		deviceTokenRepo: deviceTokenRepo,
 	}
 }
 
@@ -566,5 +576,257 @@ func TestIntegration_VoiceParsing(t *testing.T) {
 		body := dto.ParseVoiceRequest{Text: "Meeting tomorrow"}
 		w := doRequest(ts, http.MethodPost, "/api/events/parse-voice", body, "")
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// 9. Device Token API
+// ---------------------------------------------------------------------------
+
+func TestIntegration_DeviceToken(t *testing.T) {
+	ts := setupTestServer(t)
+	user := createTestUser(t, ts)
+
+	t.Run("POST /api/devices registers token", func(t *testing.T) {
+		body := dto.RegisterDeviceTokenRequest{Token: "fcm-token-abc123"}
+		w := doRequest(ts, http.MethodPost, "/api/devices", body, user.AccessToken)
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		resp := parseJSON[dto.DeviceTokenResponse](t, w)
+		assert.NotEmpty(t, resp.ID)
+		assert.Equal(t, "fcm-token-abc123", resp.Token)
+		assert.NotEmpty(t, resp.CreatedAt)
+	})
+
+	t.Run("POST /api/devices upserts same token", func(t *testing.T) {
+		body := dto.RegisterDeviceTokenRequest{Token: "fcm-token-upsert"}
+		w1 := doRequest(ts, http.MethodPost, "/api/devices", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w1.Code)
+
+		// Register the same token again — should not error
+		w2 := doRequest(ts, http.MethodPost, "/api/devices", body, user.AccessToken)
+		assert.Equal(t, http.StatusCreated, w2.Code)
+	})
+
+	t.Run("POST /api/devices upserts token ownership on account switch", func(t *testing.T) {
+		userB := createTestUser(t, ts)
+
+		body := dto.RegisterDeviceTokenRequest{Token: "fcm-shared-device-token"}
+		w1 := doRequest(ts, http.MethodPost, "/api/devices", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w1.Code)
+
+		// Different user registers the same token (app reinstall / account switch)
+		w2 := doRequest(ts, http.MethodPost, "/api/devices", body, userB.AccessToken)
+		assert.Equal(t, http.StatusCreated, w2.Code)
+
+		// Token should now belong to userB
+		tokens, err := ts.deviceTokenRepo.FindByUserID(context.Background(), userB.ID)
+		require.NoError(t, err)
+		found := false
+		for _, tok := range tokens {
+			if tok.Token == "fcm-shared-device-token" {
+				found = true
+			}
+		}
+		assert.True(t, found, "token should belong to userB after upsert")
+	})
+
+	t.Run("POST /api/devices rejects empty token", func(t *testing.T) {
+		body := map[string]any{"token": ""}
+		w := doRequest(ts, http.MethodPost, "/api/devices", body, user.AccessToken)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST /api/devices rejects missing body", func(t *testing.T) {
+		w := doRequest(ts, http.MethodPost, "/api/devices", nil, user.AccessToken)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST /api/devices rejects unauthenticated", func(t *testing.T) {
+		body := dto.RegisterDeviceTokenRequest{Token: "fcm-token-noauth"}
+		w := doRequest(ts, http.MethodPost, "/api/devices", body, "")
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("DELETE /api/devices removes token", func(t *testing.T) {
+		// First register
+		regBody := dto.RegisterDeviceTokenRequest{Token: "fcm-token-to-delete"}
+		w := doRequest(ts, http.MethodPost, "/api/devices", regBody, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w.Code)
+
+		// Then delete
+		delBody := dto.UnregisterDeviceTokenRequest{Token: "fcm-token-to-delete"}
+		w2 := doRequest(ts, http.MethodDelete, "/api/devices", delBody, user.AccessToken)
+		assert.Equal(t, http.StatusNoContent, w2.Code)
+	})
+
+	t.Run("DELETE /api/devices returns 404 for unknown token", func(t *testing.T) {
+		body := dto.UnregisterDeviceTokenRequest{Token: "nonexistent-token"}
+		w := doRequest(ts, http.MethodDelete, "/api/devices", body, user.AccessToken)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("DELETE /api/devices rejects unauthenticated", func(t *testing.T) {
+		body := dto.UnregisterDeviceTokenRequest{Token: "some-token"}
+		w := doRequest(ts, http.MethodDelete, "/api/devices", body, "")
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// 10. Notification Scheduling via Event CRUD
+// ---------------------------------------------------------------------------
+
+func TestIntegration_NotificationScheduling(t *testing.T) {
+	ts := setupTestServer(t)
+	user := createTestUser(t, ts)
+
+	t.Run("creating event schedules notifications", func(t *testing.T) {
+		// Create an event in the future with specific reminder offsets
+		body := dto.CreateEventRequest{
+			Title:           "Future Meeting",
+			StartAt:         time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
+			EndAt:           time.Now().Add(25 * time.Hour).UTC().Format(time.RFC3339),
+			Timezone:        "UTC",
+			ReminderOffsets: []int64{10, 60},
+		}
+		w := doRequest(ts, http.MethodPost, "/api/events", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w.Code)
+
+		resp := parseJSON[dto.EventResponse](t, w)
+		eventID, err := uuid.Parse(resp.ID)
+		require.NoError(t, err)
+
+		// Check that notifications were created
+		notifs, err := ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(notifs), "should create one notification per reminder offset")
+
+		// Verify offsets
+		offsets := make(map[int]bool)
+		for _, n := range notifs {
+			offsets[n.OffsetMin] = true
+			assert.Equal(t, user.ID, n.UserID)
+			assert.False(t, n.Sent)
+		}
+		assert.True(t, offsets[10], "should have 10-min offset")
+		assert.True(t, offsets[60], "should have 60-min offset")
+	})
+
+	t.Run("creating event with past reminders skips them", func(t *testing.T) {
+		// Event starts in 5 minutes — a 10-min reminder would be in the past
+		body := dto.CreateEventRequest{
+			Title:           "Soon Meeting",
+			StartAt:         time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339),
+			EndAt:           time.Now().Add(65 * time.Minute).UTC().Format(time.RFC3339),
+			Timezone:        "UTC",
+			ReminderOffsets: []int64{0, 10, 60},
+		}
+		w := doRequest(ts, http.MethodPost, "/api/events", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w.Code)
+
+		resp := parseJSON[dto.EventResponse](t, w)
+		eventID, err := uuid.Parse(resp.ID)
+		require.NoError(t, err)
+
+		notifs, err := ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+
+		// Only offset=0 (at start time, 5min from now) should survive
+		// offset=10 would be 5min ago, offset=60 would be 55min ago
+		for _, n := range notifs {
+			assert.True(t, n.NotifyAt.After(time.Now().Add(-1*time.Second)),
+				"notification should not be in the past: offset=%d, notifyAt=%s", n.OffsetMin, n.NotifyAt)
+		}
+	})
+
+	t.Run("updating event reschedules notifications", func(t *testing.T) {
+		// Create event
+		body := dto.CreateEventRequest{
+			Title:           "Reschedulable",
+			StartAt:         time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339),
+			EndAt:           time.Now().Add(49 * time.Hour).UTC().Format(time.RFC3339),
+			Timezone:        "UTC",
+			ReminderOffsets: []int64{10},
+		}
+		w := doRequest(ts, http.MethodPost, "/api/events", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w.Code)
+		resp := parseJSON[dto.EventResponse](t, w)
+		eventID, err := uuid.Parse(resp.ID)
+		require.NoError(t, err)
+
+		// Verify initial notification
+		notifs, err := ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(notifs))
+		oldNotifyAt := notifs[0].NotifyAt
+
+		// Update with different time and offsets
+		updateBody := dto.UpdateEventRequest{
+			Title:           "Reschedulable Updated",
+			StartAt:         time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339),
+			EndAt:           time.Now().Add(73 * time.Hour).UTC().Format(time.RFC3339),
+			Timezone:        "UTC",
+			ReminderOffsets: []int64{30, 60},
+		}
+		w2 := doRequest(ts, http.MethodPut, "/api/events/"+resp.ID, updateBody, user.AccessToken)
+		require.Equal(t, http.StatusOK, w2.Code)
+
+		// Check notifications were replaced
+		newNotifs, err := ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(newNotifs), "should have 2 new notifications")
+		for _, n := range newNotifs {
+			assert.NotEqual(t, oldNotifyAt, n.NotifyAt, "notification time should have changed")
+		}
+	})
+
+	t.Run("deleting event cancels notifications", func(t *testing.T) {
+		body := dto.CreateEventRequest{
+			Title:           "To Be Deleted",
+			StartAt:         time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339),
+			EndAt:           time.Now().Add(49 * time.Hour).UTC().Format(time.RFC3339),
+			Timezone:        "UTC",
+			ReminderOffsets: []int64{10, 30},
+		}
+		w := doRequest(ts, http.MethodPost, "/api/events", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w.Code)
+		resp := parseJSON[dto.EventResponse](t, w)
+		eventID, err := uuid.Parse(resp.ID)
+		require.NoError(t, err)
+
+		// Verify notifications exist
+		notifs, err := ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(notifs))
+
+		// Delete event
+		w2 := doRequest(ts, http.MethodDelete, "/api/events/"+resp.ID, nil, user.AccessToken)
+		require.Equal(t, http.StatusNoContent, w2.Code)
+
+		// Notifications should be gone
+		notifs, err = ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+		assert.Equal(t, 0, len(notifs), "notifications should be deleted with event")
+	})
+
+	t.Run("default reminder offset is 180 min", func(t *testing.T) {
+		body := dto.CreateEventRequest{
+			Title:    "Default Reminder",
+			StartAt:  time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339),
+			EndAt:    time.Now().Add(49 * time.Hour).UTC().Format(time.RFC3339),
+			Timezone: "UTC",
+			// No ReminderOffsets — should default to [180]
+		}
+		w := doRequest(ts, http.MethodPost, "/api/events", body, user.AccessToken)
+		require.Equal(t, http.StatusCreated, w.Code)
+		resp := parseJSON[dto.EventResponse](t, w)
+		eventID, err := uuid.Parse(resp.ID)
+		require.NoError(t, err)
+
+		notifs, err := ts.notifRepo.FindByEventID(context.Background(), eventID)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(notifs))
+		assert.Equal(t, 180, notifs[0].OffsetMin, "default offset should be 180 minutes")
 	})
 }

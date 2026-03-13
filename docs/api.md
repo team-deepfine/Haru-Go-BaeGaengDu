@@ -15,7 +15,7 @@ Authorization: Bearer {accessToken}
 | 분류 | 엔드포인트 | 인증 필요 |
 |------|-----------|----------|
 | Public | `POST /api/auth/apple`, `POST /api/auth/refresh` | X |
-| Protected | 그 외 모든 `/api/*` 엔드포인트 | O |
+| Protected | 그 외 모든 `/api/*` 엔드포인트 (Events, Voice, Devices) | O |
 | Health | `GET /health` | X |
 
 ---
@@ -327,7 +327,7 @@ POST /api/events
 | startAt | string | O | 시작 시간 (ISO-8601, e.g. `2024-03-10T09:00:00Z`) |
 | endAt | string | O | 종료 시간 (ISO-8601, e.g. `2024-03-10T10:00:00Z`) |
 | allDay | boolean | | 종일 여부 (default: `false`) |
-| timezone | string | | IANA 타임존 (default: `"UTC"`, e.g. `"Asia/Seoul"`) |
+| timezone | string | | IANA 타임존 (default: `"Asia/Seoul"`) |
 | locationName | string \| null | | 장소명 |
 | locationAddress | string \| null | | 주소 |
 | locationLat | number \| null | | 위도 |
@@ -610,6 +610,98 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 
 ---
 
+## Device Token API
+
+> 모든 Device Token API는 인증이 필요합니다. `Authorization: Bearer {accessToken}` 헤더를 포함하세요.
+> 푸시 알림을 받기 위해 FCM 디바이스 토큰을 등록/해제합니다.
+
+### 12. 디바이스 토큰 등록
+
+FCM 디바이스 토큰을 등록합니다. 동일 토큰이 이미 등록되어 있으면 기존 레코드를 반환합니다.
+
+```
+POST /api/devices
+```
+
+**Headers:** `Authorization: Bearer {accessToken}`
+
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| token | string | O | FCM 디바이스 토큰 |
+
+**Example**
+
+```bash
+curl -X POST http://localhost:8080/api/devices \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "fMI-qCT9S0a..."
+  }'
+```
+
+**Response** `201 Created`
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "token": "fMI-qCT9S0a...",
+  "createdAt": "2024-03-10T09:00:00Z"
+}
+```
+
+**Error**
+
+| Status | 조건 |
+|--------|------|
+| 400 | `token` 누락 |
+| 401 | 인증 토큰 누락 또는 만료 |
+
+---
+
+### 13. 디바이스 토큰 해제
+
+등록된 FCM 디바이스 토큰을 삭제합니다.
+
+```
+DELETE /api/devices
+```
+
+**Headers:** `Authorization: Bearer {accessToken}`
+
+**Request Body**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| token | string | O | 삭제할 FCM 디바이스 토큰 |
+
+**Example**
+
+```bash
+curl -X DELETE http://localhost:8080/api/devices \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "fMI-qCT9S0a..."
+  }'
+```
+
+**Response** `204 No Content`
+
+(응답 본문 없음)
+
+**Error**
+
+| Status | 조건 |
+|--------|------|
+| 400 | `token` 누락 |
+| 401 | 인증 토큰 누락 또는 만료 |
+| 404 | 등록되지 않은 토큰 |
+
+---
+
 ## Error Response
 
 모든 에러는 [RFC 7807 Problem Details](https://tools.ietf.org/html/rfc7807) 형식을 따릅니다.
@@ -659,6 +751,7 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 | timezone | 유효한 IANA 타임존 식별자 |
 | code | Apple 로그인 시 필수 (authorization code) |
 | refreshToken | 토큰 갱신 시 필수 |
+| token | 디바이스 토큰 등록/해제 시 필수 |
 
 ---
 
@@ -684,6 +777,14 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 | refreshToken | string | No | JWT refresh token (유효기간: 30일) |
 | expiresIn | number | No | access token 만료까지 남은 초 |
 | user | User Object | Yes | 사용자 정보 (로그인 시에만 포함, 갱신 시 생략) |
+
+### DeviceToken Object
+
+| Field | Type | Nullable | Description |
+|-------|------|----------|-------------|
+| id | string (UUID) | No | 디바이스 토큰 고유 식별자 |
+| token | string | No | FCM 디바이스 토큰 |
+| createdAt | string (ISO-8601) | No | 등록 시각 (UTC) |
 
 ### Event Object
 
@@ -724,6 +825,8 @@ curl -X POST http://localhost:8080/api/events/parse-voice \
 | `GEMINI_API_KEY` | X | - | Gemini API 키 (미설정 시 음성 파싱 502 반환) |
 | `GEMINI_MODEL` | X | `gemini-2.5-flash` | Gemini 모델명 |
 | `DEFAULT_TIMEZONE` | X | `Asia/Seoul` | 음성 파싱 기본 타임존 |
+| `FCM_ENABLED` | X | `false` | FCM 푸시 알림 워커 활성화 (`true`로 설정 시 활성화) |
+| `FCM_CREDENTIALS_JSON` | X | - | Firebase 서비스 계정 JSON (`FCM_ENABLED=true` 시 필수) |
 
 ---
 
