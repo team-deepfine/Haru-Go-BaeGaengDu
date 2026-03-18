@@ -183,7 +183,7 @@ curl -X POST http://localhost:8080/api/auth/apple \
 
 ### 2. 카카오 로그인
 
-카카오 SDK에서 받은 authorization code를 서버에 전달하면, 서버가 카카오 토큰 API에서 code를 교환하여 사용자를 조회/생성하고 JWT 토큰 쌍을 발급합니다.
+카카오 SDK에서 받은 access token을 서버에 전달하면, 서버가 카카오 사용자 정보 API를 조회하여 사용자를 조회/생성하고 JWT 토큰 쌍을 발급합니다.
 
 #### 카카오 로그인 Flow
 
@@ -197,29 +197,24 @@ curl -X POST http://localhost:8080/api/auth/apple \
       │                 │                     │                │
       │  2. 사용자 카카오 인증                 │                │
       │                 │                     │                │
-      │  3. authorization code 획득           │                │
-      │<── code ────────│                     │                │
+      │  3. access_token 획득                 │                │
+      │<── access_token │                     │                │
       │                 │                     │                │
       │  4. POST /api/auth/kakao              │                │
-      │     { "code": "<authorization_code>" }│                │
+      │     { "accessToken": "..." }          │                │
       │──────────────────────────────────────>│                │
       │                 │                     │                │
-      │                 │  5. code → access_token 교환         │
-      │                 │<────────────────────│                │
-      │                 │    access_token 응답 │                │
-      │                 │────────────────────>│                │
-      │                 │                     │                │
-      │                 │  6. access_token으로 │                │
+      │                 │  5. access_token으로 │                │
       │                 │     사용자 정보 조회  │                │
       │                 │<────────────────────│                │
       │                 │────────────────────>│                │
       │                 │                     │                │
-      │                 │                     │  7. 유저       │
+      │                 │                     │  6. 유저       │
       │                 │                     │     조회/생성  │
       │                 │                     │───────────────>│
       │                 │                     │<───────────────│
       │                 │                     │                │
-      │  8. 응답: accessToken, refreshToken, user              │
+      │  7. 응답: accessToken, refreshToken, user              │
       │<──────────────────────────────────────│                │
       │                 │                     │                │
 ```
@@ -234,7 +229,7 @@ POST /api/auth/kakao
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| code | string | O | 카카오 SDK에서 받은 authorization code |
+| accessToken | string | O | 카카오 SDK에서 받은 access token |
 
 **Example**
 
@@ -242,7 +237,7 @@ POST /api/auth/kakao
 curl -X POST http://localhost:8080/api/auth/kakao \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "a1b2c3d4e5f6..."
+    "accessToken": "a1b2c3d4e5f6..."
   }'
 ```
 
@@ -269,13 +264,11 @@ curl -X POST http://localhost:8080/api/auth/kakao \
 
 | Status | 조건 |
 |--------|------|
-| 400 | `code` 누락 |
-| 401 | 카카오 인증 코드가 유효하지 않음 (만료, 이미 사용됨) |
+| 400 | `accessToken` 누락 |
+| 401 | 카카오 access token이 유효하지 않음 (만료 등) |
 | 502 | 카카오 API 호출 실패 |
 
-> **Note:**
-> - 카카오 authorization code는 **1회용**이며 발급 후 짧은 시간 내에 사용해야 합니다.
-> - 카카오는 동의 항목 설정에 따라 email, nickname, profileImage가 제공되지 않을 수 있습니다.
+> **Note:** 카카오는 동의 항목 설정에 따라 email, nickname, profileImage가 제공되지 않을 수 있습니다.
 
 ---
 
@@ -947,9 +940,6 @@ curl -X DELETE http://localhost:8080/api/devices \
 | `APPLE_KEY_ID` | X | - | Apple Sign In Key ID |
 | `APPLE_PRIVATE_KEY` | X | - | Apple private key (.p8 파일의 PEM 문자열) |
 | `APPLE_REDIRECT_URI` | X | - | Apple Return URL (Apple Developer Console과 정확히 일치해야 함) |
-| `KAKAO_CLIENT_ID` | X | - | 카카오 REST API 키 |
-| `KAKAO_CLIENT_SECRET` | X | - | 카카오 Client Secret (보안 강화 시) |
-| `KAKAO_REDIRECT_URI` | X | - | 카카오 Redirect URI |
 | `GEMINI_API_KEY` | X | - | Gemini API 키 (미설정 시 음성 파싱 502 반환) |
 | `GEMINI_MODEL` | X | `gemini-2.5-flash` | Gemini 모델명 |
 | `DEFAULT_TIMEZONE` | X | `Asia/Seoul` | 음성 파싱 기본 타임존 |
