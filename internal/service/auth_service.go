@@ -23,27 +23,30 @@ type AuthService interface {
 }
 
 type authService struct {
-	userRepo    repository.UserRepository
-	tokenRepo   repository.TokenRepository
-	jwtManager  *jwt.Manager
-	appleClient *oauth.AppleClient
-	kakaoClient *oauth.KakaoClient
+	userRepo       repository.UserRepository
+	tokenRepo      repository.TokenRepository
+	deviceTokenRepo repository.DeviceTokenRepository
+	jwtManager     *jwt.Manager
+	appleClient    *oauth.AppleClient
+	kakaoClient    *oauth.KakaoClient
 }
 
 // NewAuthService creates a new AuthService.
 func NewAuthService(
 	userRepo repository.UserRepository,
 	tokenRepo repository.TokenRepository,
+	deviceTokenRepo repository.DeviceTokenRepository,
 	jwtManager *jwt.Manager,
 	appleClient *oauth.AppleClient,
 	kakaoClient *oauth.KakaoClient,
 ) AuthService {
 	return &authService{
-		userRepo:    userRepo,
-		tokenRepo:   tokenRepo,
-		jwtManager:  jwtManager,
-		appleClient: appleClient,
-		kakaoClient: kakaoClient,
+		userRepo:       userRepo,
+		tokenRepo:      tokenRepo,
+		deviceTokenRepo: deviceTokenRepo,
+		jwtManager:     jwtManager,
+		appleClient:    appleClient,
+		kakaoClient:    kakaoClient,
 	}
 }
 
@@ -199,6 +202,9 @@ func (s *authService) RefreshToken(ctx context.Context, refreshToken string) (*j
 }
 
 func (s *authService) Logout(ctx context.Context, userID uuid.UUID) error {
+	if err := s.deviceTokenRepo.DeleteByUserID(ctx, userID); err != nil {
+		return fmt.Errorf("delete device tokens: %w", err)
+	}
 	return s.tokenRepo.DeleteByUserID(ctx, userID)
 }
 
@@ -225,6 +231,9 @@ func (s *authService) DeleteAccount(ctx context.Context, userID uuid.UUID, authC
 		}
 	}
 
+	if err := s.deviceTokenRepo.DeleteByUserID(ctx, userID); err != nil {
+		return fmt.Errorf("delete device tokens: %w", err)
+	}
 	if err := s.tokenRepo.DeleteByUserID(ctx, userID); err != nil {
 		return fmt.Errorf("delete tokens: %w", err)
 	}

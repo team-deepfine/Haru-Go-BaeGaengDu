@@ -43,6 +43,10 @@ func (m *mockDeviceTokenRepository) FindByUserID(ctx context.Context, userID uui
 	return nil, nil
 }
 
+func (m *mockDeviceTokenRepository) DeleteByUserID(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
 func (m *mockDeviceTokenRepository) DeleteByToken(ctx context.Context, token string) error {
 	if m.deleteByTokenFn != nil {
 		return m.deleteByTokenFn(ctx, token)

@@ -88,7 +88,8 @@ func setupTestServer(t *testing.T) *testServer {
 	)
 	require.NoError(t, err)
 	kakaoClient := oauth.NewKakaoClient("test-kakao-id", "", "")
-	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
+	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+	authSvc := service.NewAuthService(userRepo, tokenRepo, deviceTokenRepo, jwtManager, appleClient, kakaoClient)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	notifRepo := repository.NewNotificationRepository(db)
@@ -98,7 +99,6 @@ func setupTestServer(t *testing.T) *testServer {
 
 	voiceHandler := handler.NewVoiceHandler(&noopVoiceParsingService{})
 
-	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 	deviceTokenSvc := service.NewDeviceTokenService(deviceTokenRepo)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenSvc)
 

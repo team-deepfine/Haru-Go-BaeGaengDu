@@ -7,6 +7,9 @@
 .env
 .env.local
 
+# Firebase credentials
+*firebase*.json
+
 # Prompts
 prompts/
 
@@ -29,6 +32,9 @@ vendor/
 .claude/
 CLAUDE.md
 CLAUDE.local.md
+
+# Externals
+zexternals/
 
 # Docs
 requirments.md

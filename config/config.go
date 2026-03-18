@@ -8,7 +8,7 @@ import (
 
 // FCMConfig holds Firebase Cloud Messaging settings.
 type FCMConfig struct {
-	CredentialsJSON string
+	CredentialsFile string
 	Enabled         bool
 }
 
@@ -96,7 +96,7 @@ func Load() *Config {
 			RedirectURI:  getEnv("KAKAO_REDIRECT_URI", ""),
 		},
 		FCM: FCMConfig{
-			CredentialsJSON: getEnv("FCM_CREDENTIALS_JSON", ""),
+			CredentialsFile: getEnv("FCM_CREDENTIALS_FILE", ""),
 			Enabled:         getEnv("FCM_ENABLED", "false") == "true",
 		},
 	}

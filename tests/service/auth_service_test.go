@@ -114,6 +114,32 @@ func (m *mockTokenRepository) DeleteExpired(ctx context.Context) error {
 	return nil
 }
 
+// mockDeviceTokenRepository implements repository.DeviceTokenRepository for testing.
+type mockDeviceTokenRepository struct {
+	deleteByUserIDFn func(ctx context.Context, userID uuid.UUID) error
+}
+
+var _ repository.DeviceTokenRepository = (*mockDeviceTokenRepository)(nil)
+
+func (m *mockDeviceTokenRepository) Upsert(_ context.Context, _ *model.DeviceToken) error {
+	return nil
+}
+func (m *mockDeviceTokenRepository) DeleteByUserAndToken(_ context.Context, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockDeviceTokenRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
+	if m.deleteByUserIDFn != nil {
+		return m.deleteByUserIDFn(ctx, userID)
+	}
+	return nil
+}
+func (m *mockDeviceTokenRepository) FindByUserID(_ context.Context, _ uuid.UUID) ([]model.DeviceToken, error) {
+	return nil, nil
+}
+func (m *mockDeviceTokenRepository) DeleteByToken(_ context.Context, _ string) error {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
@@ -179,7 +205,7 @@ func TestRefreshToken_Success(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, jwtMgr, newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, &mockDeviceTokenRepository{}, jwtMgr, newTestAppleClient(), newTestKakaoClient())
 
 	newPair, err := svc.RefreshToken(context.Background(), originalPair.RefreshToken)
 	if err != nil {
@@ -207,7 +233,7 @@ func TestRefreshToken_InvalidToken(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	_, err := svc.RefreshToken(context.Background(), "totally-invalid-token")
 	if err == nil {
@@ -232,7 +258,7 @@ func TestLogout_Success(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(&mockUserRepository{}, tokenRepo, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	err := svc.Logout(context.Background(), userID)
 	if err != nil {
@@ -261,7 +287,7 @@ func TestGetCurrentUser_Success(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(userRepo, &mockTokenRepository{}, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	user, err := svc.GetCurrentUser(context.Background(), userID)
 	if err != nil {
@@ -288,7 +314,7 @@ func TestGetCurrentUser_NotFound(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(userRepo, &mockTokenRepository{}, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	_, err := svc.GetCurrentUser(context.Background(), uuid.Must(uuid.NewV7()))
 	if err == nil {
@@ -327,7 +353,7 @@ func TestDeleteAccount_NonAppleUser(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(userRepo, tokenRepo, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(userRepo, tokenRepo, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	err := svc.DeleteAccount(context.Background(), userID, "")
 	if err != nil {
@@ -350,7 +376,7 @@ func TestDeleteAccount_AppleUser_MissingCode(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(userRepo, &mockTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
+	svc := service.NewAuthService(userRepo, &mockTokenRepository{}, &mockDeviceTokenRepository{}, newTestJWTManager(), newTestAppleClient(), newTestKakaoClient())
 
 	err := svc.DeleteAccount(context.Background(), userID, "")
 	if err == nil {
@@ -418,7 +444,7 @@ func TestDeleteAccount_AppleUser_RevokeSuccess(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(userRepo, tokenRepo, newTestJWTManager(), appleClient, newTestKakaoClient())
+	svc := service.NewAuthService(userRepo, tokenRepo, &mockDeviceTokenRepository{}, newTestJWTManager(), appleClient, newTestKakaoClient())
 
 	err := svc.DeleteAccount(context.Background(), userID, "valid-auth-code")
 	if err != nil {
@@ -446,6 +472,7 @@ func TestAppleLogin_InvalidCode(t *testing.T) {
 	svc := service.NewAuthService(
 		&mockUserRepository{},
 		&mockTokenRepository{},
+		&mockDeviceTokenRepository{},
 		newTestJWTManager(),
 		appleClient,
 		newTestKakaoClient(),
@@ -506,7 +533,7 @@ func TestAppleLogin_Success(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAuthService(userRepo, tokenRepo, newTestJWTManager(), appleClient, newTestKakaoClient())
+	svc := service.NewAuthService(userRepo, tokenRepo, &mockDeviceTokenRepository{}, newTestJWTManager(), appleClient, newTestKakaoClient())
 
 	user, tokenPair, err := svc.AppleLogin(context.Background(), "valid-auth-code")
 	if err != nil {

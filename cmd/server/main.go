@@ -78,15 +78,15 @@ func main() {
 	}
 	kakaoClient := oauth.NewKakaoClient(cfg.Kakao.ClientID, cfg.Kakao.ClientSecret, cfg.Kakao.RedirectURI)
 
-	// Wire auth dependencies
-	userRepo := repository.NewUserRepository(db)
-	tokenRepo := repository.NewTokenRepository(db)
-	authSvc := service.NewAuthService(userRepo, tokenRepo, jwtManager, appleClient, kakaoClient)
-	authHandler := handler.NewAuthHandler(authSvc)
-
 	// Wire notification dependencies
 	notifRepo := repository.NewNotificationRepository(db)
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+
+	// Wire auth dependencies
+	userRepo := repository.NewUserRepository(db)
+	tokenRepo := repository.NewTokenRepository(db)
+	authSvc := service.NewAuthService(userRepo, tokenRepo, deviceTokenRepo, jwtManager, appleClient, kakaoClient)
+	authHandler := handler.NewAuthHandler(authSvc)
 	notifScheduler := service.NewNotificationScheduler(notifRepo)
 
 	// Wire event dependencies (with notification scheduler)
@@ -122,7 +122,7 @@ func main() {
 	// Start notification worker if FCM is enabled
 	var workerCancel context.CancelFunc
 	if cfg.FCM.Enabled {
-		fcmClient, err := fcm.NewClient(context.Background(), []byte(cfg.FCM.CredentialsJSON))
+		fcmClient, err := fcm.NewClient(context.Background(), cfg.FCM.CredentialsFile)
 		if err != nil {
 			slog.Error("failed to create FCM client", "error", err)
 			os.Exit(1)

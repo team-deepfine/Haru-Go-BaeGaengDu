@@ -15,9 +15,9 @@ type Client struct {
 	messaging *messaging.Client
 }
 
-// NewClient creates an FCM client authenticated with a service account JSON.
-func NewClient(ctx context.Context, credJSON []byte) (*Client, error) {
-	app, err := firebase.NewApp(ctx, nil, option.WithCredentialsJSON(credJSON))
+// NewClient creates an FCM client authenticated with a service account JSON file.
+func NewClient(ctx context.Context, credFile string) (*Client, error) {
+	app, err := firebase.NewApp(ctx, nil, option.WithCredentialsFile(credFile))
 	if err != nil {
 		return nil, fmt.Errorf("create firebase app: %w", err)
 	}

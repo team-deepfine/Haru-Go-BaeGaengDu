@@ -14,6 +14,7 @@ import (
 type DeviceTokenRepository interface {
 	Upsert(ctx context.Context, token *model.DeviceToken) error
 	DeleteByUserAndToken(ctx context.Context, userID uuid.UUID, token string) error
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 	FindByUserID(ctx context.Context, userID uuid.UUID) ([]model.DeviceToken, error)
 	DeleteByToken(ctx context.Context, token string) error
 }
@@ -44,6 +45,13 @@ func (r *deviceTokenRepository) DeleteByUserAndToken(ctx context.Context, userID
 	}
 	if result.RowsAffected == 0 {
 		return model.ErrDeviceTokenNotFound
+	}
+	return nil
+}
+
+func (r *deviceTokenRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
+	if err := r.db.WithContext(ctx).Delete(&model.DeviceToken{}, "user_id = ?", userID).Error; err != nil {
+		return fmt.Errorf("delete device tokens by user: %w", err)
 	}
 	return nil
 }
