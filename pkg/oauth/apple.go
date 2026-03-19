@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/daewon/haru/pkg/applejwks"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -28,14 +29,16 @@ type AppleUserInfo struct {
 
 // AppleClient exchanges Apple authorization codes for user information.
 type AppleClient struct {
-	clientID    string
-	teamID      string
-	keyID       string
-	privateKey  *ecdsa.PrivateKey
-	redirectURI string
-	tokenURL    string
-	revokeURL   string
-	httpClient  *http.Client
+	clientID     string
+	teamID       string
+	keyID        string
+	privateKey   *ecdsa.PrivateKey
+	redirectURI  string
+	tokenURL     string
+	revokeURL    string
+	httpClient   *http.Client
+	jwksVerifier *applejwks.Verifier
+	skipJWKS     bool // for testing only
 }
 
 // NewAppleClient creates a new Apple OAuth client.
@@ -46,15 +49,20 @@ func NewAppleClient(clientID, teamID, keyID, privateKeyPEM, redirectURI string) 
 		return nil, fmt.Errorf("parse apple private key: %w", err)
 	}
 
+	// Initialize JWKS verifier for id_token signature verification.
+	// Non-fatal if it fails — will retry on first verification.
+	jwksVerifier, _ := applejwks.NewVerifier()
+
 	return &AppleClient{
-		clientID:    clientID,
-		teamID:      teamID,
-		keyID:       keyID,
-		privateKey:  privKey,
-		redirectURI: redirectURI,
-		tokenURL:    appleTokenURL,
-		revokeURL:   appleRevokeURL,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		clientID:     clientID,
+		teamID:       teamID,
+		keyID:        keyID,
+		privateKey:   privKey,
+		redirectURI:  redirectURI,
+		tokenURL:     appleTokenURL,
+		revokeURL:    appleRevokeURL,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		jwksVerifier: jwksVerifier,
 	}, nil
 }
 
@@ -66,6 +74,11 @@ func (a *AppleClient) SetTokenURL(url string) {
 // SetRevokeURL overrides the Apple revoke endpoint URL (for testing).
 func (a *AppleClient) SetRevokeURL(url string) {
 	a.revokeURL = url
+}
+
+// SetSkipJWKS disables JWKS signature verification (for testing only).
+func (a *AppleClient) SetSkipJWKS(skip bool) {
+	a.skipJWKS = skip
 }
 
 // ExchangeAndGetUser exchanges an authorization code for an Apple access token,
@@ -197,18 +210,36 @@ func (a *AppleClient) revokeToken(ctx context.Context, token, clientSecret strin
 	return nil
 }
 
-// decodeIDToken extracts claims from the id_token without signature verification.
-// This is safe because the token was received directly from Apple over HTTPS.
+// decodeIDToken verifies the id_token signature against Apple's JWKS and extracts claims.
 func (a *AppleClient) decodeIDToken(idToken string) (*AppleUserInfo, error) {
-	parser := jwt.NewParser()
-	token, _, err := parser.ParseUnverified(idToken, jwt.MapClaims{})
-	if err != nil {
-		return nil, fmt.Errorf("parse id_token: %w", err)
-	}
+	var claims jwt.MapClaims
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
+	if a.skipJWKS {
+		// Testing mode: parse without signature verification
+		parser := jwt.NewParser()
+		token, _, err := parser.ParseUnverified(idToken, jwt.MapClaims{})
+		if err != nil {
+			return nil, fmt.Errorf("parse id_token: %w", err)
+		}
+		var ok bool
+		claims, ok = token.Claims.(jwt.MapClaims)
+		if !ok {
+			return nil, fmt.Errorf("invalid token claims")
+		}
+	} else {
+		if a.jwksVerifier == nil {
+			v, err := applejwks.NewVerifier()
+			if err != nil {
+				return nil, fmt.Errorf("apple jwks unavailable: %w", err)
+			}
+			a.jwksVerifier = v
+		}
+
+		var err error
+		claims, err = a.jwksVerifier.VerifyAndParse(idToken)
+		if err != nil {
+			return nil, fmt.Errorf("verify id_token: %w", err)
+		}
 	}
 
 	sub, ok := claims["sub"].(string)
