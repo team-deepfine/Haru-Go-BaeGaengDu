@@ -16,6 +16,7 @@ type DeviceTokenRepository interface {
 	DeleteByUserAndToken(ctx context.Context, userID uuid.UUID, token string) error
 	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
 	FindByUserID(ctx context.Context, userID uuid.UUID) ([]model.DeviceToken, error)
+	FindByUserIDs(ctx context.Context, userIDs []uuid.UUID) ([]model.DeviceToken, error)
 	DeleteByToken(ctx context.Context, token string) error
 }
 
@@ -60,6 +61,17 @@ func (r *deviceTokenRepository) FindByUserID(ctx context.Context, userID uuid.UU
 	var tokens []model.DeviceToken
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&tokens).Error; err != nil {
 		return nil, fmt.Errorf("find device tokens: %w", err)
+	}
+	return tokens, nil
+}
+
+func (r *deviceTokenRepository) FindByUserIDs(ctx context.Context, userIDs []uuid.UUID) ([]model.DeviceToken, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var tokens []model.DeviceToken
+	if err := r.db.WithContext(ctx).Where("user_id IN ?", userIDs).Find(&tokens).Error; err != nil {
+		return nil, fmt.Errorf("find device tokens by user ids: %w", err)
 	}
 	return tokens, nil
 }

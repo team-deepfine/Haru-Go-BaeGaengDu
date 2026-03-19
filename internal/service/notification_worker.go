@@ -71,36 +71,49 @@ func (w *NotificationWorker) processPending(ctx context.Context) {
 
 	slog.Info("processing pending notifications", "count", len(notifications))
 
-	// Group notifications by user to batch device token lookups.
+	// Group notifications by user.
 	byUser := make(map[uuid.UUID][]model.Notification)
+	var userIDs []uuid.UUID
 	for _, n := range notifications {
+		if _, exists := byUser[n.UserID]; !exists {
+			userIDs = append(userIDs, n.UserID)
+		}
 		byUser[n.UserID] = append(byUser[n.UserID], n)
 	}
 
-	for userID, userNotifs := range byUser {
-		tokens, err := w.deviceRepo.FindByUserID(ctx, userID)
-		if err != nil {
-			slog.Error("failed to fetch device tokens", "userID", userID, "error", err)
-			continue
-		}
+	// Batch fetch all device tokens in one query.
+	allTokens, err := w.deviceRepo.FindByUserIDs(ctx, userIDs)
+	if err != nil {
+		slog.Error("failed to batch fetch device tokens", "error", err)
+		return
+	}
 
-		if len(tokens) == 0 {
-			// No registered devices — mark as sent to avoid re-processing.
+	tokensByUser := make(map[uuid.UUID][]string)
+	for _, t := range allTokens {
+		tokensByUser[t.UserID] = append(tokensByUser[t.UserID], t.Token)
+	}
+
+	var noDeviceIDs []uuid.UUID
+
+	for userID, userNotifs := range byUser {
+		userTokens := tokensByUser[userID]
+
+		if len(userTokens) == 0 {
 			for _, n := range userNotifs {
-				if err := w.notifRepo.MarkSent(ctx, n.ID); err != nil {
-					slog.Error("failed to mark notification sent (no devices)", "id", n.ID, "error", err)
-				}
+				noDeviceIDs = append(noDeviceIDs, n.ID)
 			}
 			continue
 		}
 
-		tokenStrings := make([]string, len(tokens))
-		for i, t := range tokens {
-			tokenStrings[i] = t.Token
-		}
-
 		for _, n := range userNotifs {
-			w.sendNotification(ctx, n, tokenStrings)
+			w.sendNotification(ctx, n, userTokens)
+		}
+	}
+
+	// Batch mark notifications with no devices as sent.
+	if len(noDeviceIDs) > 0 {
+		if err := w.notifRepo.MarkSentBatch(ctx, noDeviceIDs); err != nil {
+			slog.Error("failed to batch mark notifications sent (no devices)", "error", err)
 		}
 	}
 }

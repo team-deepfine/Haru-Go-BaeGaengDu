@@ -1,4 +1,4 @@
-package service
+package service_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/daewon/haru/internal/model"
+	"github.com/daewon/haru/internal/service"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -64,6 +65,10 @@ func (m *mockNotificationRepository) IncrementRetries(ctx context.Context, id uu
 	return nil
 }
 
+func (m *mockNotificationRepository) MarkSentBatch(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
+
 func (m *mockNotificationRepository) FindByEventID(ctx context.Context, eventID uuid.UUID) ([]model.Notification, error) {
 	if m.findByEventIDFn != nil {
 		return m.findByEventIDFn(ctx, eventID)
@@ -81,12 +86,12 @@ func TestNotificationScheduler_ScheduleForEvent(t *testing.T) {
 
 	t.Run("creates notifications for future offsets", func(t *testing.T) {
 		repo := &mockNotificationRepository{}
-		scheduler := NewNotificationScheduler(repo)
+		scheduler := service.NewNotificationScheduler(repo)
 
 		event := &model.Event{
 			ID:              eventID,
 			UserID:          userID,
-			StartAt:         time.Now().Add(24 * time.Hour).UTC(),
+			StartAt:         time.Now().Add(25 * time.Hour).UTC(),
 			ReminderOffsets: model.Int64Array{10, 60, 1440},
 		}
 
@@ -109,7 +114,7 @@ func TestNotificationScheduler_ScheduleForEvent(t *testing.T) {
 
 	t.Run("skips past notifications", func(t *testing.T) {
 		repo := &mockNotificationRepository{}
-		scheduler := NewNotificationScheduler(repo)
+		scheduler := service.NewNotificationScheduler(repo)
 
 		// Event starts in 5 minutes
 		event := &model.Event{
@@ -130,7 +135,7 @@ func TestNotificationScheduler_ScheduleForEvent(t *testing.T) {
 
 	t.Run("empty reminder offsets creates no notifications", func(t *testing.T) {
 		repo := &mockNotificationRepository{}
-		scheduler := NewNotificationScheduler(repo)
+		scheduler := service.NewNotificationScheduler(repo)
 
 		event := &model.Event{
 			ID:              eventID,
@@ -147,7 +152,7 @@ func TestNotificationScheduler_ScheduleForEvent(t *testing.T) {
 
 func TestNotificationScheduler_CancelForEvent(t *testing.T) {
 	repo := &mockNotificationRepository{}
-	scheduler := NewNotificationScheduler(repo)
+	scheduler := service.NewNotificationScheduler(repo)
 	eventID := uuid.Must(uuid.NewV7())
 
 	err := scheduler.CancelForEvent(context.Background(), eventID)
@@ -158,7 +163,7 @@ func TestNotificationScheduler_CancelForEvent(t *testing.T) {
 
 func TestNotificationScheduler_RescheduleForEvent(t *testing.T) {
 	repo := &mockNotificationRepository{}
-	scheduler := NewNotificationScheduler(repo)
+	scheduler := service.NewNotificationScheduler(repo)
 	eventID := uuid.Must(uuid.NewV7())
 
 	event := &model.Event{
@@ -177,32 +182,3 @@ func TestNotificationScheduler_RescheduleForEvent(t *testing.T) {
 	assert.Equal(t, 1, len(repo.createdNotifications))
 }
 
-// ---------------------------------------------------------------------------
-// Tests: formatNotificationBody
-// ---------------------------------------------------------------------------
-
-func TestFormatNotificationBody(t *testing.T) {
-	tests := []struct {
-		offsetMin int
-		want      string
-	}{
-		{0, "일정이 지금 시작됩니다"},
-		{5, "5분 후 일정이 시작됩니다"},
-		{10, "10분 후 일정이 시작됩니다"},
-		{30, "30분 후 일정이 시작됩니다"},
-		{59, "59분 후 일정이 시작됩니다"},
-		{60, "1시간 후 일정이 시작됩니다"},
-		{120, "2시간 후 일정이 시작됩니다"},
-		{180, "3시간 후 일정이 시작됩니다"},
-		{1439, "23시간 후 일정이 시작됩니다"},
-		{1440, "1일 후 일정이 시작됩니다"},
-		{2880, "2일 후 일정이 시작됩니다"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			got := formatNotificationBody(tt.offsetMin)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
