@@ -16,6 +16,7 @@ type NotificationRepository interface {
 	DeleteByEventID(ctx context.Context, eventID uuid.UUID) error
 	FindPending(ctx context.Context, before time.Time, limit int) ([]model.Notification, error)
 	MarkSent(ctx context.Context, id uuid.UUID) error
+	MarkSentBatch(ctx context.Context, ids []uuid.UUID) error
 	IncrementRetries(ctx context.Context, id uuid.UUID) error
 	FindByEventID(ctx context.Context, eventID uuid.UUID) ([]model.Notification, error)
 }
@@ -63,6 +64,16 @@ func (r *notificationRepository) FindPending(ctx context.Context, before time.Ti
 func (r *notificationRepository) MarkSent(ctx context.Context, id uuid.UUID) error {
 	if err := r.db.WithContext(ctx).Model(&model.Notification{}).Where("id = ?", id).Update("sent", true).Error; err != nil {
 		return fmt.Errorf("mark notification sent: %w", err)
+	}
+	return nil
+}
+
+func (r *notificationRepository) MarkSentBatch(ctx context.Context, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := r.db.WithContext(ctx).Model(&model.Notification{}).Where("id IN ?", ids).Update("sent", true).Error; err != nil {
+		return fmt.Errorf("mark notifications sent batch: %w", err)
 	}
 	return nil
 }
