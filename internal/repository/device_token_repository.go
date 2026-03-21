@@ -69,8 +69,12 @@ func (r *deviceTokenRepository) FindByUserIDs(ctx context.Context, userIDs []uui
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
+	ids := make([]string, len(userIDs))
+	for i, id := range userIDs {
+		ids[i] = id.String()
+	}
 	var tokens []model.DeviceToken
-	if err := r.db.WithContext(ctx).Where("user_id IN ?", userIDs).Find(&tokens).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id IN ?", ids).Find(&tokens).Error; err != nil {
 		return nil, fmt.Errorf("find device tokens by user ids: %w", err)
 	}
 	return tokens, nil

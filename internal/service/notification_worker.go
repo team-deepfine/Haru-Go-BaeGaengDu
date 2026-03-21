@@ -131,7 +131,14 @@ func (w *NotificationWorker) sendNotification(ctx context.Context, notif model.N
 		"type":    "event_reminder",
 	}
 
-	invalidTokens := w.fcmClient.SendMulticast(ctx, tokens, title, body, data)
+	invalidTokens, err := w.fcmClient.SendMulticast(ctx, tokens, title, body, data)
+	if err != nil {
+		// FCM call failed entirely — increment retries for next poll.
+		if err := w.notifRepo.IncrementRetries(ctx, notif.ID); err != nil {
+			slog.Error("failed to increment retries", "id", notif.ID, "error", err)
+		}
+		return
+	}
 
 	// Remove invalid tokens.
 	for _, token := range invalidTokens {
@@ -141,8 +148,7 @@ func (w *NotificationWorker) sendNotification(ctx context.Context, notif model.N
 		}
 	}
 
-	// If there were no invalid tokens and no errors, mark as sent.
-	// If all tokens are invalid, also mark as sent (no valid devices left).
+	// If all tokens succeeded or all were invalid, mark as sent.
 	if len(invalidTokens) == len(tokens) || len(invalidTokens) == 0 {
 		if err := w.notifRepo.MarkSent(ctx, notif.ID); err != nil {
 			slog.Error("failed to mark notification sent", "id", notif.ID, "error", err)

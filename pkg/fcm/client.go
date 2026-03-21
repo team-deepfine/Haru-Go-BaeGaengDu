@@ -31,10 +31,10 @@ func NewClient(ctx context.Context, credFile string) (*Client, error) {
 }
 
 // SendMulticast sends a push notification to multiple device tokens.
-// Returns the list of tokens that were invalid and should be removed.
-func (c *Client) SendMulticast(ctx context.Context, tokens []string, title, body string, data map[string]string) []string {
+// Returns the list of invalid tokens and an error if the entire call failed.
+func (c *Client) SendMulticast(ctx context.Context, tokens []string, title, body string, data map[string]string) ([]string, error) {
 	if len(tokens) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	msg := &messaging.MulticastMessage{
@@ -54,7 +54,7 @@ func (c *Client) SendMulticast(ctx context.Context, tokens []string, title, body
 	resp, err := c.messaging.SendEachForMulticast(ctx, msg)
 	if err != nil {
 		slog.Error("FCM SendEachForMulticast failed", "error", err)
-		return nil
+		return nil, fmt.Errorf("fcm multicast: %w", err)
 	}
 
 	var invalidTokens []string
@@ -78,5 +78,5 @@ func (c *Client) SendMulticast(ctx context.Context, tokens []string, title, body
 		"failure", resp.FailureCount,
 	)
 
-	return invalidTokens
+	return invalidTokens, nil
 }
