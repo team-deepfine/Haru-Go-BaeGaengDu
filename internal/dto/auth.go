@@ -53,6 +53,7 @@ type UserResponse struct {
 	CreatedAt          string  `json:"createdAt"`
 	LastLoginAt        *string `json:"lastLoginAt,omitempty"`
 	Bio                *string `json:"bio,omitempty"`
+	PhoneNumber        *string `json:"phoneNumber,omitempty"`
 }
 
 // ToUserResponse converts a domain User model to an API response DTO.
