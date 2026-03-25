@@ -1,0 +1,41 @@
+# =============================================================================
+# API 스펙 변경 알림 워크플로우
+#
+# main 브랜치에 PR이 머지되면 Discord 웹훅을 통해 알림을 전송합니다.
+# claude-channel(discord.ts)이 이 메시지를 감지하고 Claude Code 세션에 전달하면,
+# Claude가 PR diff를 분석하여 API 스펙 변경 시 클라이언트 코드를 자동 동기화합니다.
+#
+# 필요한 GitHub Secrets:
+# - DISCORD_DEPLOY_WEBHOOK_URL: Discord 채널 웹훅 URL
+#     (채널 설정 → 연동 → 웹훅 → 새 웹훅 → URL 복사)
+# =============================================================================
+
+name: API Sync Notification
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+jobs:
+  notify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord에 PR 머지 알림 전송
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DEPLOY_WEBHOOK_URL }}
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
+          REPO="${{ github.repository }}"
+
+          CONTENT="PR #${PR_NUMBER} merged to main by ${MERGED_BY}
+${PR_TITLE}
+${PR_URL}"
+
+          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": $(echo "$CONTENT" | jq -Rs .)}"
