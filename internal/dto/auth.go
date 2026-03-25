@@ -47,7 +47,6 @@ type UserResponse struct {
 	Email              *string `json:"email,omitempty"`
 	Nickname           *string `json:"nickname,omitempty"`
 	ProfileImage       *string `json:"profileImage,omitempty"`
-	AvatarURL          *string `json:"avatarUrl,omitempty"`
 	SubscriptionStatus string  `json:"subscriptionStatus"`
 	SubscriptionExpiry *string `json:"subscriptionExpiry,omitempty"`
 	CreatedAt          string  `json:"createdAt"`
