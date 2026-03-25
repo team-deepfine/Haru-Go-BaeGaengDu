@@ -61,6 +61,10 @@ func (m *mockUserRepository) Update(ctx context.Context, user *model.User) error
 	return nil
 }
 
+func (m *mockUserRepository) FindByOriginalTransactionID(_ context.Context, _ string) (*model.User, error) {
+	return nil, model.ErrUserNotFound
+}
+
 func (m *mockUserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if m.deleteFn != nil {
 		return m.deleteFn(ctx, id)

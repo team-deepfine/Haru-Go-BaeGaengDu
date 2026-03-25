@@ -889,7 +889,7 @@ func TestIntegration_SubscriptionStatus(t *testing.T) {
 	})
 }
 
-func TestIntegration_SubscriptionLazyExpiry(t *testing.T) {
+func TestIntegration_SubscriptionStatusFromWebhook(t *testing.T) {
 	ts := setupTestServer(t)
 	user := createTestUser(t, ts)
 
@@ -904,12 +904,12 @@ func TestIntegration_SubscriptionLazyExpiry(t *testing.T) {
 	err = ts.userRepo.Update(ctx, u)
 	require.NoError(t, err)
 
-	t.Run("expired premium user is downgraded to free on status check", func(t *testing.T) {
+	t.Run("expired premium user stays premium until webhook downgrades", func(t *testing.T) {
 		w := doRequest(ts, http.MethodGet, "/api/subscription", nil, user.AccessToken)
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		resp := parseJSON[dto.SubscriptionResponse](t, w)
-		assert.Equal(t, "free", resp.SubscriptionStatus)
+		assert.Equal(t, "premium", resp.SubscriptionStatus)
 	})
 }
 

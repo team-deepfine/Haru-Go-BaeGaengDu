@@ -41,6 +41,9 @@ func (m *mockSubUserRepository) Update(ctx context.Context, user *model.User) er
 	m.user = user
 	return nil
 }
+func (m *mockSubUserRepository) FindByOriginalTransactionID(_ context.Context, _ string) (*model.User, error) {
+	return nil, model.ErrUserNotFound
+}
 func (m *mockSubUserRepository) Delete(_ context.Context, _ uuid.UUID) error { return nil }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +87,7 @@ func TestSubscriptionService_GetStatus(t *testing.T) {
 		assert.NotNil(t, resp.ExpiresAt)
 	})
 
-	t.Run("lazy check downgrades expired premium to free", func(t *testing.T) {
+	t.Run("expired premium stays premium until webhook downgrades", func(t *testing.T) {
 		userID := uuid.Must(uuid.NewV7())
 		expired := time.Now().Add(-1 * time.Hour)
 		repo := &mockSubUserRepository{
@@ -98,9 +101,9 @@ func TestSubscriptionService_GetStatus(t *testing.T) {
 
 		resp, err := svc.GetStatus(context.Background(), userID)
 		require.NoError(t, err)
-		assert.Equal(t, "free", resp.SubscriptionStatus)
-		// Verify DB was updated
-		assert.Equal(t, "free", repo.user.SubscriptionStatus)
+		assert.Equal(t, "premium", resp.SubscriptionStatus)
+		// Status should NOT be changed by GetStatus — only webhook changes it
+		assert.Equal(t, "premium", repo.user.SubscriptionStatus)
 	})
 
 	t.Run("returns error for non-existent user", func(t *testing.T) {
@@ -184,7 +187,7 @@ func TestSubscriptionService_CheckVoiceParseLimit(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("expired premium user is treated as free", func(t *testing.T) {
+	t.Run("expired premium user still has unlimited access until webhook downgrades", func(t *testing.T) {
 		userID := uuid.Must(uuid.NewV7())
 		expired := time.Now().Add(-1 * time.Hour)
 		now := time.Now().UTC()
@@ -200,9 +203,7 @@ func TestSubscriptionService_CheckVoiceParseLimit(t *testing.T) {
 		svc := service.NewSubscriptionService(repo, nil, 3)
 
 		err := svc.CheckVoiceParseLimit(context.Background(), userID)
-		require.ErrorIs(t, err, model.ErrVoiceParseLimit)
-		// Verify lazy check updated the status
-		assert.Equal(t, "free", repo.user.SubscriptionStatus)
+		require.NoError(t, err) // premium status is trusted until webhook changes it
 	})
 }
 
