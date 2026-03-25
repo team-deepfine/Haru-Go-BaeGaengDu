@@ -14,8 +14,9 @@ type User struct {
 	Email              *string    `json:"email,omitempty"`
 	Nickname           *string    `json:"nickname,omitempty"`
 	ProfileImage       *string    `json:"profileImage,omitempty"`
-	SubscriptionStatus string     `gorm:"not null;default:'free'" json:"subscriptionStatus"`
-	SubscriptionExpiry *time.Time `json:"subscriptionExpiry,omitempty"`
+	SubscriptionStatus        string     `gorm:"not null;default:'free'" json:"subscriptionStatus"`
+	SubscriptionExpiry        *time.Time `json:"subscriptionExpiry,omitempty"`
+	OriginalTransactionID     *string    `gorm:"uniqueIndex" json:"-"`
 	VoiceParseCount    int        `gorm:"not null;default:0" json:"-"`
 	VoiceParseDate     *time.Time `json:"-"`
 	CreatedAt          time.Time  `gorm:"autoCreateTime" json:"createdAt"`
@@ -24,14 +25,10 @@ type User struct {
 }
 
 // IsPremium returns true if the user has an active premium subscription.
+// Subscription status is managed by Apple Server Notifications webhook,
+// not by checking expiry time locally.
 func (u *User) IsPremium() bool {
-	if u.SubscriptionStatus != "premium" {
-		return false
-	}
-	if u.SubscriptionExpiry != nil && u.SubscriptionExpiry.Before(time.Now()) {
-		return false
-	}
-	return true
+	return u.SubscriptionStatus == "premium"
 }
 
 // RefreshToken represents a stored refresh token for JWT rotation.

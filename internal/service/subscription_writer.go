@@ -32,6 +32,7 @@ func (s *subscriptionService) VerifyAndActivate(ctx context.Context, userID uuid
 	}
 
 	user.SubscriptionStatus = "premium"
+	user.OriginalTransactionID = &tx.OriginalTransactionID
 	if tx.ExpiresAt != nil {
 		user.SubscriptionExpiry = tx.ExpiresAt
 	} else {
@@ -51,14 +52,6 @@ func (s *subscriptionService) CheckVoiceParseLimit(ctx context.Context, userID u
 	user, err := s.userRepo.FindByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("find user: %w", err)
-	}
-
-	// Lazy check: expire subscription if needed
-	if user.SubscriptionStatus == "premium" && !user.IsPremium() {
-		user.SubscriptionStatus = "free"
-		if err := s.userRepo.Update(ctx, user); err != nil {
-			return fmt.Errorf("update expired subscription: %w", err)
-		}
 	}
 
 	// Premium users have unlimited access

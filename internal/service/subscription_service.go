@@ -15,6 +15,7 @@ const defaultVoiceParseLimit = 3
 type SubscriptionService interface {
 	VerifyAndActivate(ctx context.Context, userID uuid.UUID, transactionID string) (*dto.SubscriptionResponse, error)
 	GetStatus(ctx context.Context, userID uuid.UUID) (*dto.SubscriptionResponse, error)
+	HandleNotification(ctx context.Context, signedPayload string) error
 	CheckVoiceParseLimit(ctx context.Context, userID uuid.UUID) error
 	IncrementVoiceParseCount(ctx context.Context, userID uuid.UUID) error
 }

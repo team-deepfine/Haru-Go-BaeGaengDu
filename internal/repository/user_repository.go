@@ -14,6 +14,7 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 	FindByProviderSub(ctx context.Context, provider, providerSub string) (*model.User, error)
+	FindByOriginalTransactionID(ctx context.Context, originalTransactionID string) (*model.User, error)
 	Update(ctx context.Context, user *model.User) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -54,6 +55,18 @@ func (r *userRepository) FindByProviderSub(ctx context.Context, provider, provid
 			return nil, nil // not found is not an error for login flow
 		}
 		return nil, fmt.Errorf("find user by provider sub: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *userRepository) FindByOriginalTransactionID(ctx context.Context, originalTransactionID string) (*model.User, error) {
+	var user model.User
+	err := r.db.WithContext(ctx).First(&user, "original_transaction_id = ?", originalTransactionID).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, model.ErrUserNotFound
+		}
+		return nil, fmt.Errorf("find user by original transaction id: %w", err)
 	}
 	return &user, nil
 }
