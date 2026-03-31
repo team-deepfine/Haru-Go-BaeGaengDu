@@ -15,6 +15,7 @@ Authorization: Bearer {accessToken}
 | 분류 | 엔드포인트 | 인증 필요 |
 |------|-----------|----------|
 | Public | `POST /api/auth/apple`, `POST /api/auth/kakao`, `POST /api/auth/refresh` | X |
+| Webhook | `POST /api/apple/notifications` (Apple Server Notifications V2) | X |
 | Protected | 그 외 모든 `/api/*` 엔드포인트 (Events, Voice, Devices, Subscription) | O |
 | Health | `GET /health` | X |
 
@@ -907,6 +908,51 @@ curl -X POST http://localhost:8080/api/subscription/verify \
 | 401 | 인증 토큰 누락 또는 만료 |
 | 402 | Transaction 검증 실패 (환불됨, 유효하지 않은 거래) |
 | 502 | App Store Server API 호출 실패 |
+
+---
+
+### 17. Apple Server Notifications V2 Webhook
+
+Apple이 구독 상태 변경 시(갱신, 만료, 환불 등) 서버로 알림을 전송하는 엔드포인트입니다. App Store Connect에서 서버 URL을 등록해야 합니다.
+
+> 이 엔드포인트는 **인증 불필요** (Apple이 직접 호출). JWS 서명을 x5c 인증서 체인으로 검증하여 위변조를 방지합니다.
+
+```
+POST /api/apple/notifications
+```
+
+**Request Body** (Apple이 전송)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| signedPayload | string | Apple이 서명한 JWS payload |
+
+**처리되는 이벤트**
+
+| Notification Type | 서버 동작 |
+|-------------------|----------|
+| `DID_RENEW` | 구독 갱신 → status: `premium`, expiresAt 업데이트 |
+| `SUBSCRIBED` | 신규 구독 → status: `premium`, expiresAt 업데이트 |
+| `EXPIRED` | 구독 만료 → status: `free` |
+| `REVOKE` | 가족 공유 해제 등 → status: `free` |
+| `REFUND` | 환불 → status: `free` |
+| `GRACE_PERIOD_EXPIRED` | Grace period 만료 → status: `free` |
+| `DID_FAIL_TO_RENEW` | 결제 실패 (billing retry 중) → premium 유지 |
+
+**Response** — Apple 재시도를 방지하기 위해 항상 `200 OK`를 반환합니다.
+
+```json
+{"status": "ok"}
+```
+
+**App Store Connect 설정**
+
+App Store Connect → 앱 → App Information → App Store Server Notifications에서 서버 URL을 등록합니다.
+
+- Production URL: `https://your-domain.com/api/apple/notifications`
+- Sandbox URL: `https://your-domain.com/api/apple/notifications`
+
+> 로컬 테스트 시 ngrok 등으로 외부 접근 가능한 URL을 만들어 등록해야 합니다.
 
 ---
 
